@@ -7,138 +7,151 @@
 # CORE: Google Agent Development Kit
 # ------------------------------------------------------------
 google-adk==1.14.0
-# The primary agent framework. Provides LlmAgent, ParallelAgent,
-# SequentialAgent, FunctionTool, and all ADK orchestration primitives.
+# Primary agent framework — LlmAgent, ParallelAgent, FunctionTool.
+# Pinned to 1.x — ADK 2.0 alpha is on PyPI with breaking changes.
+# NOTE: ADK bundles its own FastAPI via get_fast_api_app() — do NOT
+# add fastapi separately (starlette version conflict).
 
 # ------------------------------------------------------------
 # LLM & VERTEX AI
 # ------------------------------------------------------------
 google-cloud-aiplatform>=1.95.1
-# Vertex AI SDK — access to Gemini models (2.5 Pro, Flash),
-# text-embedding-004 for vector generation, and Agent Engine deployment.
+# Vertex AI SDK — Agent Engine deployment, TextEmbeddingModel for
+# generating pgvector embeddings, and Vertex AI infrastructure.
 
 vertexai>=1.70.0
-# High-level Vertex AI SDK. Used for TextEmbeddingModel.from_pretrained()
-# to generate 768-dim embeddings for pgvector similarity search in AlloyDB.
+# High-level Vertex AI SDK. Use ONLY for TextEmbeddingModel and
+# Agent Engine. DO NOT use vertexai.generative_models — deprecated
+# since June 2025, removed June 2026. Use google-genai instead.
 
-google-generativeai
-# Google Generative AI client — direct Gemini API access as a fallback
-# or for lightweight Gemini calls outside of Vertex AI.
+google-genai>=1.0.0
+# Google Gen AI SDK — the replacement for vertexai.generative_models.
+# Use this for all Gemini 2.5 Pro/Flash calls in agent code.
 
 # ------------------------------------------------------------
 # MCP TOOL INTEGRATION
 # ------------------------------------------------------------
 mcp>=1.8.0
-# Model Context Protocol SDK. Required for ADK to connect to and
-# invoke external MCP servers (Google Workspace, Cloud SQL Toolbox, etc.).
+# Model Context Protocol SDK. Required for ADK to connect to Google
+# Workspace MCP, Cloud SQL Toolbox, and other MCP servers.
 
 # ------------------------------------------------------------
 # GOOGLE CLOUD SERVICES
 # ------------------------------------------------------------
 google-cloud-firestore>=2.16.0
-# Firestore client. Powers the real-time agent activity event stream
-# used by the live dashboard (one Firestore doc per agent action).
+# Firestore client — real-time agent activity event stream for dashboard.
 
 google-cloud-secret-manager>=2.20.0
-# Secret Manager client. Fetches OAuth tokens, DB passwords, and API keys
-# at runtime on Cloud Run — avoids hardcoding secrets in .env files.
+# Secret Manager — fetch OAuth tokens and DB passwords at runtime on
+# Cloud Run. Do not hardcode secrets in .env for production.
 
 # ------------------------------------------------------------
 # GOOGLE AUTH & WORKSPACE APIs
 # ------------------------------------------------------------
 google-auth>=2.29.0
-# Base auth library. Required by every google-cloud-* package for
-# Application Default Credentials (ADC) and service account auth.
+# Base auth library — Application Default Credentials for all
+# google-cloud-* packages and service account authentication.
 
 google-auth-httplib2>=0.2.0
 # HTTP transport adapter for google-auth. Required by
-# google-api-python-client to make authenticated API requests.
+# google-api-python-client for authenticated Workspace API calls.
 
 google-api-python-client>=2.130.0
-# Google Workspace API client. Underlies Gmail, Google Calendar,
-# Google Docs, and Google Sheets MCP tool calls made by Dev 3.
+# Google Workspace API client — Gmail, Google Calendar, Google Docs,
+# Google Sheets. Underlying library for Dev 3's MCP tool wrappers.
 
 # ------------------------------------------------------------
 # DATABASE — CLOUD SQL / ALLOYDB
 # ------------------------------------------------------------
 cloud-sql-python-connector[pg8000]>=1.9.0
 # Google's official secure connector for Cloud SQL and AlloyDB.
-# Handles IAM auth and SSL automatically — no manual proxy setup needed.
+# Handles IAM auth and SSL — no manual proxy or cert management.
 
 pg8000>=1.31.0
-# Pure-Python PostgreSQL driver required by the Cloud SQL Connector.
-# No C build tools needed, so it works cleanly inside Docker/Cloud Run.
+# Pure-Python PostgreSQL driver for the Cloud SQL Connector.
+# No C build tools needed — works cleanly in Docker and Cloud Run.
 
 sqlalchemy>=2.0.0
-# ORM and connection pool management on top of pg8000.
-# Makes DB queries in agent tools clean and type-safe.
+# ORM and connection pool on top of pg8000. Keeps DB queries in
+# agent tools clean and type-safe.
 
 pgvector>=0.3.0
-# Python client for the pgvector PostgreSQL extension.
-# Lets you insert Python lists as vector columns and run
-# cosine similarity queries for past incident retrieval.
+# Python client for the pgvector PostgreSQL extension. Inserts Python
+# lists as vector columns and runs cosine similarity queries.
 
 # ------------------------------------------------------------
 # LANGCHAIN (ALLOYDB VECTORSTORE + VERTEX AI EMBEDDINGS)
 # ------------------------------------------------------------
 langchain-community==0.3.27
-# LangChain community integrations. Provides base tooling used by
-# langchain-google-alloydb-pg and langchain-google-vertexai.
+# LangChain community integrations. Base tooling for AlloyDB and
+# Vertex AI LangChain packages.
 
-langchain-google-alloydb-pg>=0.6.0
-# LangChain wrapper for AlloyDB vectorstore. Gives Dev 4 a clean
-# AlloyDBVectorStore interface for similarity search without raw SQL.
+langchain-core==0.3.27
+# ⚠️ MUST PIN EXPLICITLY — Cloud Run has a confirmed bug where
+# langchain-community does not install langchain-core as an indirect
+# dependency, causing ModuleNotFoundError at runtime. Pin to match
+# langchain-community minor version (both 0.3.x).
+
+langchain-google-alloydb-pg>=0.14.0
+# LangChain wrapper for AlloyDB vectorstore. Pinned >=0.14.0 because
+# v0.13.0 introduced breaking changes to AlloyDBVectorStore/AlloyDBEngine.
+# Gives Dev 4 a clean AlloyDBVectorStore interface without raw SQL.
 
 langchain-google-vertexai>=2.0.0
-# Bridges LangChain embeddings with VertexAIEmbeddings (text-embedding-004).
+# Bridges LangChain with VertexAIEmbeddings (text-embedding-004).
 # Used alongside langchain-google-alloydb-pg for the RAG pipeline.
 
 # ------------------------------------------------------------
-# BACKEND — FASTAPI + ASYNC
+# ASYNC HTTP
 # ------------------------------------------------------------
-fastapi>=0.115.0
-# Web framework for the POST /incident webhook and REST API endpoints.
-# Async-first design matches ADK's async execution model.
-
-uvicorn[standard]>=0.30.0
-# ASGI server to run FastAPI. Required to actually serve the API —
-# FastAPI cannot run without an ASGI server like uvicorn.
-
 httpx>=0.27.0
-# Async HTTP client. Preferred over requests for async ADK agent contexts.
-# Used for any outbound HTTP calls agents make to external services.
+# Async HTTP client — preferred over requests for async ADK agent
+# contexts. Used for outbound HTTP calls agents make to external APIs.
 
 # ------------------------------------------------------------
 # DATA VALIDATION
 # ------------------------------------------------------------
 pydantic>=2.7.2
-# Data validation and structured output parsing. Used to define
-# incident schemas, agent message models, and validate Gemini JSON responses.
+# Data validation and structured output. Incident schemas, agent
+# message models, and Gemini JSON response parsing.
 
 # ------------------------------------------------------------
 # ENVIRONMENT & CONFIG
 # ------------------------------------------------------------
 python-dotenv==1.0.1
-# Loads .env files for local development (API keys, project IDs).
-# Cloud Run uses Secret Manager instead — this is for local dev only.
+# Loads .env files for local development only.
+# Cloud Run uses Secret Manager — this is not needed in production.
 
 # ------------------------------------------------------------
 # PDF INGESTION (RUNBOOKS)
 # ------------------------------------------------------------
 pypdf==4.3.0
-# PDF parsing library. Used if runbooks or incident reports are
-# stored as PDFs that need to be ingested into the DB at setup time.
+# PDF parsing — ingests runbook PDFs into the DB at setup time.
 
 # ------------------------------------------------------------
 # NUMERIC PROCESSING
 # ------------------------------------------------------------
-numpy<2.0.0
-# Array operations. Required by pgvector and LangChain for
-# embedding vector manipulation. Pinned below 2.0 for compatibility.
+numpy>=1.26.0
+# Array operations for pgvector and LangChain embedding manipulation.
+# Upper bound removed — langchain-google-alloydb-pg>=0.10.0 requires
+# numpy v2 compatibility, so <2.0.0 pin causes a conflict.
 
 # ------------------------------------------------------------
 # HTTP REQUESTS
 # ------------------------------------------------------------
 requests>=2.32.4
-# Synchronous HTTP client. Used for simple outbound calls in
-# non-async contexts (e.g., setup scripts, health checks).
+# Synchronous HTTP client for setup scripts and health checks.
+
+# ============================================================
+# REMOVED — REASONS:
+# ============================================================
+# chromadb        → Replaced by AlloyDB + pgvector (Google-native).
+# wikipedia       → Not relevant to CrisisOps AI.
+# flask           → Removed — ADK uses FastAPI internally via
+#                   get_fast_api_app(). Adding Flask or a separate
+#                   FastAPI causes a starlette version conflict.
+# fastapi         → Same reason as Flask — use ADK's built-in
+#                   get_fast_api_app() instead.
+# uvicorn         → ADK's built-in server handles this.
+# pypdf (dup)     → Was listed twice — deduplicated above.
+# ============================================================
