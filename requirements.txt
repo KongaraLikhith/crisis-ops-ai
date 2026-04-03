@@ -1,0 +1,144 @@
+# ============================================================
+# CrisisOps AI — requirements.txt
+# Google ADK Hackathon Stack
+# ============================================================
+
+# ------------------------------------------------------------
+# CORE: Google Agent Development Kit
+# ------------------------------------------------------------
+google-adk==1.14.0
+# The primary agent framework. Provides LlmAgent, ParallelAgent,
+# SequentialAgent, FunctionTool, and all ADK orchestration primitives.
+
+# ------------------------------------------------------------
+# LLM & VERTEX AI
+# ------------------------------------------------------------
+google-cloud-aiplatform>=1.95.1
+# Vertex AI SDK — access to Gemini models (2.5 Pro, Flash),
+# text-embedding-004 for vector generation, and Agent Engine deployment.
+
+vertexai>=1.70.0
+# High-level Vertex AI SDK. Used for TextEmbeddingModel.from_pretrained()
+# to generate 768-dim embeddings for pgvector similarity search in AlloyDB.
+
+google-generativeai
+# Google Generative AI client — direct Gemini API access as a fallback
+# or for lightweight Gemini calls outside of Vertex AI.
+
+# ------------------------------------------------------------
+# MCP TOOL INTEGRATION
+# ------------------------------------------------------------
+mcp>=1.8.0
+# Model Context Protocol SDK. Required for ADK to connect to and
+# invoke external MCP servers (Google Workspace, Cloud SQL Toolbox, etc.).
+
+# ------------------------------------------------------------
+# GOOGLE CLOUD SERVICES
+# ------------------------------------------------------------
+google-cloud-firestore>=2.16.0
+# Firestore client. Powers the real-time agent activity event stream
+# used by the live dashboard (one Firestore doc per agent action).
+
+google-cloud-secret-manager>=2.20.0
+# Secret Manager client. Fetches OAuth tokens, DB passwords, and API keys
+# at runtime on Cloud Run — avoids hardcoding secrets in .env files.
+
+# ------------------------------------------------------------
+# GOOGLE AUTH & WORKSPACE APIs
+# ------------------------------------------------------------
+google-auth>=2.29.0
+# Base auth library. Required by every google-cloud-* package for
+# Application Default Credentials (ADC) and service account auth.
+
+google-auth-httplib2>=0.2.0
+# HTTP transport adapter for google-auth. Required by
+# google-api-python-client to make authenticated API requests.
+
+google-api-python-client>=2.130.0
+# Google Workspace API client. Underlies Gmail, Google Calendar,
+# Google Docs, and Google Sheets MCP tool calls made by Dev 3.
+
+# ------------------------------------------------------------
+# DATABASE — CLOUD SQL / ALLOYDB
+# ------------------------------------------------------------
+cloud-sql-python-connector[pg8000]>=1.9.0
+# Google's official secure connector for Cloud SQL and AlloyDB.
+# Handles IAM auth and SSL automatically — no manual proxy setup needed.
+
+pg8000>=1.31.0
+# Pure-Python PostgreSQL driver required by the Cloud SQL Connector.
+# No C build tools needed, so it works cleanly inside Docker/Cloud Run.
+
+sqlalchemy>=2.0.0
+# ORM and connection pool management on top of pg8000.
+# Makes DB queries in agent tools clean and type-safe.
+
+pgvector>=0.3.0
+# Python client for the pgvector PostgreSQL extension.
+# Lets you insert Python lists as vector columns and run
+# cosine similarity queries for past incident retrieval.
+
+# ------------------------------------------------------------
+# LANGCHAIN (ALLOYDB VECTORSTORE + VERTEX AI EMBEDDINGS)
+# ------------------------------------------------------------
+langchain-community==0.3.27
+# LangChain community integrations. Provides base tooling used by
+# langchain-google-alloydb-pg and langchain-google-vertexai.
+
+langchain-google-alloydb-pg>=0.6.0
+# LangChain wrapper for AlloyDB vectorstore. Gives Dev 4 a clean
+# AlloyDBVectorStore interface for similarity search without raw SQL.
+
+langchain-google-vertexai>=2.0.0
+# Bridges LangChain embeddings with VertexAIEmbeddings (text-embedding-004).
+# Used alongside langchain-google-alloydb-pg for the RAG pipeline.
+
+# ------------------------------------------------------------
+# BACKEND — FASTAPI + ASYNC
+# ------------------------------------------------------------
+fastapi>=0.115.0
+# Web framework for the POST /incident webhook and REST API endpoints.
+# Async-first design matches ADK's async execution model.
+
+uvicorn[standard]>=0.30.0
+# ASGI server to run FastAPI. Required to actually serve the API —
+# FastAPI cannot run without an ASGI server like uvicorn.
+
+httpx>=0.27.0
+# Async HTTP client. Preferred over requests for async ADK agent contexts.
+# Used for any outbound HTTP calls agents make to external services.
+
+# ------------------------------------------------------------
+# DATA VALIDATION
+# ------------------------------------------------------------
+pydantic>=2.7.2
+# Data validation and structured output parsing. Used to define
+# incident schemas, agent message models, and validate Gemini JSON responses.
+
+# ------------------------------------------------------------
+# ENVIRONMENT & CONFIG
+# ------------------------------------------------------------
+python-dotenv==1.0.1
+# Loads .env files for local development (API keys, project IDs).
+# Cloud Run uses Secret Manager instead — this is for local dev only.
+
+# ------------------------------------------------------------
+# PDF INGESTION (RUNBOOKS)
+# ------------------------------------------------------------
+pypdf==4.3.0
+# PDF parsing library. Used if runbooks or incident reports are
+# stored as PDFs that need to be ingested into the DB at setup time.
+
+# ------------------------------------------------------------
+# NUMERIC PROCESSING
+# ------------------------------------------------------------
+numpy<2.0.0
+# Array operations. Required by pgvector and LangChain for
+# embedding vector manipulation. Pinned below 2.0 for compatibility.
+
+# ------------------------------------------------------------
+# HTTP REQUESTS
+# ------------------------------------------------------------
+requests>=2.32.4
+# Synchronous HTTP client. Used for simple outbound calls in
+# non-async contexts (e.g., setup scripts, health checks).
