@@ -1,23 +1,14 @@
-import psycopg2
+# backend/database.py
 import os
+from flask import Flask
+from models import db
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_db():
-    """Returns a database connection"""
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
-
-def run_query(sql, params=None, fetch=False):
-    """Helper: run any SQL query"""
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(sql, params or ())
-    if fetch:
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-        return rows
-    conn.commit()
-    cur.close()
-    conn.close()
+def create_app():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    db.init_app(app)
+    return app

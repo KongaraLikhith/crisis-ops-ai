@@ -1,78 +1,119 @@
-from fastapi import FastAPI, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
+# backend/main.py
+import threading
 import uuid
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from models import db
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# ── App setup ────────────────────────────────────────────
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+CORS(app)           # allow React (port 5173) to call this server
+db.init_app(app)
+
+# Create tables on first run if they don't exist
+with app.app_context():
+    db.create_all()
+
 from tools.db_tools import (save_incident, agents_done, assign_incident,
                              resolve_incident, get_incident,
                              get_logs, list_incidents)
 
-app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
-                   allow_methods=["*"], allow_headers=["*"])
 
-# ── REQUEST BODIES ───────────────────────────────────────
-class TriggerRequest(BaseModel):
-    title: str
-    description: str
+# ── TRIGGER ──────────────────────────────────────────────
+@app.route("/api/incident/trigger", methods=["POST"])
+def trigger_incident():
+    data = request.get_json()
+    title       = data.get("title", "")
+    description = data.get("description", "")
 
-class AssignRequest(BaseModel):
-    developer_name: str       # e.g. "Rahul" or "rahul@team.com"
+    if not title:
+        return jsonify({"error": "title required"}), 400
 
-class ResolveRequest(BaseModel):
-    resolved_by: str
-    agent_was_correct: bool   # did the agent's root cause match reality?
-    human_root_cause: Optional[str] = None   # fill if agent was wrong
-    human_resolution: str     # what steps actually fixed it
+    incident_id = "INC-" + str(uuid.uuid4())[:8].upper()
 
-# ── ENDPOINTS ────────────────────────────────────────────
-@app.post("/api/incident/trigger")
-async def trigger(req: TriggerRequest, bg: BackgroundTasks):
-    incident_id = "inc-" + str(uuid.uuid4())[:8]
-    save_incident(incident_id, req.title, req.description)
-    bg.add_task(process_incident, incident_id, req.title, req.description)
-    return {"incident_id": incident_id}
+    with app.app_context():
+        save_incident(incident_id, title, description)
 
-@app.patch("/api/incident/{incident_id}/assign")
-def assign(incident_id: str, req: AssignRequest):
-    assign_incident(incident_id, req.developer_name)
-    return {"status": "assigned", "assigned_to": req.developer_name}
-
-@app.patch("/api/incident/{incident_id}/resolve")
-def resolve(incident_id: str, req: ResolveRequest):
-    # If agent was correct, reuse its root cause
-    root_cause = req.human_root_cause if not req.agent_was_correct else None
-    resolve_incident(
-        incident_id,
-        req.resolved_by,
-        req.agent_was_correct,
-        root_cause,
-        req.human_resolution
+    # Run agents in a background thread so we return immediately
+    thread = threading.Thread(
+        target=run_agents_background,
+        args=(incident_id, title, description)
     )
-    return {"status": "resolved"}
+    thread.start()
 
-@app.get("/api/incident/{incident_id}")
-def get_one(incident_id: str):
-    inc = get_incident(incident_id)
-    return inc if inc else {"status": "not_found"}
+    return jsonify({"incident_id": incident_id}), 201
 
-@app.get("/api/logs/{incident_id}")
-def get_incident_logs(incident_id: str):
-    return get_logs(incident_id)
 
-@app.get("/api/incidents")
-def get_all():
-    return list_incidents()
+def run_agents_background(incident_id, title, description):
+    """Runs inside a thread — needs its own app context."""
+    import asyncio
+    with app.app_context():
+        asyncio.run(process_incident(incident_id, title, description))
 
-# ── BACKGROUND TASK ──────────────────────────────────────
+
 async def process_incident(incident_id, title, description):
     from agents.commander import classify_severity, run_all_agents
     severity = await classify_severity(title, description)
     results  = await run_all_agents(incident_id, title, description, severity)
     agents_done(
-        incident_id, severity,
+        incident_id,
+        severity,
         results["triage_root_cause"],
         results["triage_resolution"],
         results["comms"],
         results["docs"]
     )
+
+
+# ── ASSIGN ───────────────────────────────────────────────
+@app.route("/api/incident/<incident_id>/assign", methods=["PATCH"])
+def assign(incident_id):
+    data = request.get_json()
+    developer = data.get("developer_name", "")
+    if not developer:
+        return jsonify({"error": "developer_name required"}), 400
+    assign_incident(incident_id, developer)
+    return jsonify({"status": "assigned", "assigned_to": developer})
+
+
+# ── RESOLVE ──────────────────────────────────────────────
+@app.route("/api/incident/<incident_id>/resolve", methods=["PATCH"])
+def resolve(incident_id):
+    data = request.get_json()
+    resolve_incident(
+        incident_id,
+        data.get("resolved_by"),
+        data.get("agent_was_correct"),
+        data.get("human_root_cause"),
+        data.get("human_resolution")
+    )
+    return jsonify({"status": "resolved"})
+
+
+# ── READ ENDPOINTS ───────────────────────────────────────
+@app.route("/api/incident/<incident_id>", methods=["GET"])
+def get_one(incident_id):
+    inc = get_incident(incident_id)
+    return jsonify(inc) if inc else jsonify({"error": "not found"}), 404
+
+@app.route("/api/logs/<incident_id>", methods=["GET"])
+def get_incident_logs(incident_id):
+    return jsonify(get_logs(incident_id))
+
+@app.route("/api/incidents", methods=["GET"])
+def get_all():
+    return jsonify(list_incidents())
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=8000)
