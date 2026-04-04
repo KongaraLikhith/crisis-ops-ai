@@ -279,7 +279,7 @@ def save_triage_report(
         estimated_users_impacted=tool_context.state.get("ESTIMATED_USERS_IMPACTED"),
         recommended_action=tool_context.state.get("RECOMMENDED_ACTION", "monitor"),
         requires_executive_notification=tool_context.state.get(
-            "REQUIRES_EXEC_NOTIFICATION", False      # ← completed
+            "REQUIRES_EXEC_NOTIFICATION", False
         ),
         requires_vendor_escalation=tool_context.state.get(
             "REQUIRES_VENDOR_ESCALATION", False
@@ -288,6 +288,89 @@ def save_triage_report(
     )
 
     tool_context.state["TRIAGE_REPORT"] = report.model_dump()
-    ...
+
+    # Optionally reflect status in DB for severe incidents
+    if report.confirmed_severity in ("P1", "P2"):
+        update_incident_status(
+            incident_id=report.incident_id,
+            status="in_triage",
+        )
+        log_incident_event(
+            incident_id=report.incident_id,
+            event_type="triage_completed",
+            detail=f"Severity={report.confirmed_severity}, blast_radius={report.blast_radius}",
+        )
+
+    logger.info(
+        "[Triage] save_triage_report: id=%s severity=%s systems=%d",
+        report.incident_id,
+        report.confirmed_severity,
+        len(report.affected_systems),
+    )
     return {"status": "success", "triage_report": report.model_dump()}
-       
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Triage Agent
+# ══════════════════════════════════════════════════════════════════════════════
+
+triage_agent = Agent(
+    name="crisis_triage",
+    model=model_name,
+    description=(
+        "Analyses the incident description, confirms severity, determines blast "
+        "radius, identifies affected systems, and records an initial triage report."
+    ),
+    instruction="""
+You are the CrisisOps Triage Agent.
+
+Your job is to quickly but carefully assess the impact of the active incident.
+
+━━━ STEP 1 — Confirm severity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Call `assess_severity` with:
+  - description       = { INCIDENT_DESCRIPTION }
+  - initial_severity  = { INCIDENT_SEVERITY }
+
+━━━ STEP 2 — Identify affected systems ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Call `identify_affected_systems` with:
+  - description       = { INCIDENT_DESCRIPTION }
+
+━━━ STEP 3 — Calculate blast radius ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Call `calculate_blast_radius` using:
+  - confirmed_severity    = value from STEP 1
+  - affected_system_count = length of AFFECTED_SYSTEMS from STEP 2
+
+━━━ STEP 4 — Escalate if required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+If the recommended_action is 'page_oncall' or 'executive_brief', call
+`escalate_to_oncall` with:
+  - team   = the most appropriate on-call team (platform | security | dba | executive)
+  - reason = a short justification referencing severity and blast radius.
+
+━━━ STEP 5 — Save the triage report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Call `save_triage_report` with a 1–2 sentence plain-English summary of:
+  - confirmed severity
+  - blast radius
+  - key affected systems
+  - recommended action
+
+Finally, present a concise triage summary back to the user.
+
+━━━ CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INCIDENT_ID:        { INCIDENT_ID }
+INCIDENT_TITLE:     { INCIDENT_TITLE }
+INCIDENT_SEVERITY:  { INCIDENT_SEVERITY }
+INCIDENT_DESCRIPTION:
+{ INCIDENT_DESCRIPTION }
+""",
+    tools=[
+        assess_severity,
+        identify_affected_systems,
+        calculate_blast_radius,
+        escalate_to_oncall,
+        save_triage_report,
+        get_incident,
+        update_incident_status,
+        log_incident_event,
+    ],
+    output_key="triage_report",
+)
