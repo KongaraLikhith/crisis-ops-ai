@@ -1,0 +1,91 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);line-height:1.5}
+.tree{padding:8px 0}
+.row{display:flex;align-items:center;gap:0;padding:1px 0;white-space:nowrap}
+.indent{display:inline-block;width:18px;flex-shrink:0}
+.pipe{display:inline-block;width:18px;color:var(--color-border-secondary);flex-shrink:0;text-align:center}
+.icon{font-size:11px;margin-right:4px;flex-shrink:0}
+.name{font-size:12px}
+.tag{font-size:10px;padding:1px 6px;border-radius:10px;margin-left:8px;font-family:var(--font-sans);font-weight:500}
+.t-d1{background:#EEEDFE;color:#534AB7}
+.t-d2{background:#E1F5EE;color:#0F6E56}
+.t-d3{background:#FAECE7;color:#993C1D}
+.t-d4{background:#FAEEDA;color:#854F0B}
+.t-sh{background:#F1EFE8;color:#5F5E5A}
+.dim{color:var(--color-text-tertiary)}
+.folder{color:var(--color-text-primary);font-weight:500}
+.file{color:var(--color-text-secondary)}
+.root{color:var(--color-text-primary);font-weight:500;font-size:13px}
+.section-label{font-family:var(--font-sans);font-size:10px;font-weight:500;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.06em;padding:12px 0 4px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;padding:12px 0 4px}
+.leg{display:flex;align-items:center;gap:5px;font-family:var(--font-sans);font-size:11px;color:var(--color-text-secondary)}
+</style>
+
+<div class="legend">
+  <div class="leg"><span class="tag t-d1">Dev 1</span> Agents</div>
+  <div class="leg"><span class="tag t-d2">Dev 2</span> API + DB</div>
+  <div class="leg"><span class="tag t-d3">Dev 3</span> Frontend</div>
+  <div class="leg"><span class="tag t-d4">Dev 4</span> Search</div>
+  <div class="leg"><span class="tag t-sh">shared</span> Config</div>
+</div>
+
+<div class="tree">
+
+<div class="row"><span class="root">crisisops/</span><span class="tag t-sh">one git repo</span></div>
+
+<div class="row"><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name folder">.gitignore</span><span class="tag t-sh">shared</span></div>
+<div class="row"><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name folder">README.md</span><span class="tag t-sh">shared</span></div>
+
+<div class="section-label" style="padding-left:0">Backend</div>
+
+<div class="row"><span class="indent"></span><span class="pipe">├</span><span class="icon">📁</span><span class="name folder">backend/</span></div>
+
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">main.py</span><span class="tag t-d2">Dev 2</span><span class="dim" style="margin-left:8px;font-size:11px">FastAPI app, all endpoints</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">database.py</span><span class="tag t-d2">Dev 2</span><span class="dim" style="margin-left:8px;font-size:11px">get_db(), run_query() helpers</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">models.py</span><span class="tag t-d2">Dev 2</span><span class="dim" style="margin-left:8px;font-size:11px">Pydantic request/response shapes</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">schema.sql</span><span class="tag t-d2">Dev 2</span><span class="dim" style="margin-left:8px;font-size:11px">CREATE TABLE statements, run in Supabase</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">seed_data.sql</span><span class="tag t-d4">Dev 4</span><span class="dim" style="margin-left:8px;font-size:11px">INSERT past incidents, run once</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">requirements.txt</span><span class="tag t-sh">shared</span><span class="dim" style="margin-left:8px;font-size:11px">all pip packages listed here</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">.env</span><span class="tag t-sh">never commit</span><span class="dim" style="margin-left:8px;font-size:11px">API keys, DB URL</span></div>
+
+<div class="row" style="margin-top:4px"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📁</span><span class="name folder">agents/</span><span class="tag t-d1">Dev 1 owns</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">base.py</span><span class="dim" style="margin-left:8px;font-size:11px">get_llm() — shared Gemini setup</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">commander.py</span><span class="dim" style="margin-left:8px;font-size:11px">classify_severity(), run_all_agents()</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">triage.py</span><span class="dim" style="margin-left:8px;font-size:11px">run_triage() → {root_cause, resolution}</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">comms.py</span><span class="dim" style="margin-left:8px;font-size:11px">run_comms() → posts Slack + Calendar</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">└</span><span class="icon">📄</span><span class="name file">docs_agent.py</span><span class="dim" style="margin-left:8px;font-size:11px">run_docs() → post-mortem draft</span></div>
+
+<div class="row" style="margin-top:4px"><span class="indent"></span><span class="indent"></span><span class="pipe">└</span><span class="icon">📁</span><span class="name folder">tools/</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">db_tools.py</span><span class="tag t-d2">Dev 2</span><span class="dim" style="margin-left:8px;font-size:11px">save, log, assign, resolve, get_incident</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">slack_tool.py</span><span class="tag t-d3">Dev 3</span><span class="dim" style="margin-left:8px;font-size:11px">post_to_slack(message)</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">calendar_tool.py</span><span class="tag t-d3">Dev 3</span><span class="dim" style="margin-left:8px;font-size:11px">create_war_room() Google Calendar</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">└</span><span class="icon">📄</span><span class="name file">search_tool.py</span><span class="tag t-d4">Dev 4</span><span class="dim" style="margin-left:8px;font-size:11px">search_similar_incidents(query)</span></div>
+
+<div class="section-label" style="padding-left:0">Frontend</div>
+
+<div class="row"><span class="indent"></span><span class="pipe">└</span><span class="icon">📁</span><span class="name folder">frontend/</span><span class="tag t-d3">Dev 3 owns</span></div>
+
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">index.html</span><span class="dim" style="margin-left:8px;font-size:11px">entry point, auto-generated by Vite</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">package.json</span><span class="dim" style="margin-left:8px;font-size:11px">npm dependencies</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">vite.config.js</span><span class="dim" style="margin-left:8px;font-size:11px">dev server config, auto-generated</span></div>
+
+<div class="row" style="margin-top:4px"><span class="indent"></span><span class="indent"></span><span class="pipe">└</span><span class="icon">📁</span><span class="name folder">src/</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">main.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">React entry, renders App</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">App.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">root layout, holds selected incident state</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">App.css</span><span class="dim" style="margin-left:8px;font-size:11px">global styles, layout grid</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">api.js</span><span class="dim" style="margin-left:8px;font-size:11px">all fetch calls to FastAPI in one file</span></div>
+
+<div class="row" style="margin-top:4px"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">└</span><span class="icon">📁</span><span class="name folder">components/</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">Navbar.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">top bar, live status badges</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">IncidentList.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">left sidebar, incident cards by status</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">TriggerPanel.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">presets + textarea + trigger button</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">AgentStatusRow.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">4 agent cards showing done/running/idle</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">AgentFeed.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">live activity log, polls every 2s</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">ResultTabs.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">tabs: Feed / Triage / Comms / Post-mortem</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">AssignPanel.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">assign dropdown — shows when agents_done</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">├</span><span class="icon">📄</span><span class="name file">ResolvePanel.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">yes/no agent correct + human fix form</span></div>
+<div class="row"><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="indent"></span><span class="pipe">└</span><span class="icon">📄</span><span class="name file">VectorPanel.jsx</span><span class="dim" style="margin-left:8px;font-size:11px">right sidebar — similarity scores + bars</span></div>
+
+</div>
