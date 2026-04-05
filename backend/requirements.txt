@@ -32,3 +32,4 @@ numpy>=1.24.4
 
 # PDF parsing
 pypdf==4.3.0
+psycopg2-binary==2.9.11

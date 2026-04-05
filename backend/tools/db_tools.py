@@ -1,6 +1,6 @@
 from datetime import datetime
 from models import db, Incident, IncidentLog, PastIncident
-
+from tools.embedding_tool import embed_resolved_incident
 
 # ── CREATE ───────────────────────────────────────────────
 def save_incident(incident_id, title, description):
@@ -132,12 +132,13 @@ def resolve_incident(incident_id, resolved_by,
     db.session.commit()
 
     # Graduate/update into past_incidents
-    _graduate_to_history(
+    past_incident = _graduate_to_history(
         inc,
         agent_was_correct,
         human_root_cause,
         human_resolution
     )
+    embed_resolved_incident(past_incident)
 
 
 def _graduate_to_history(inc, agent_was_correct,
@@ -162,6 +163,7 @@ def _graduate_to_history(inc, agent_was_correct,
     past.updated_at = datetime.utcnow()
 
     db.session.commit()
+    return past
 
 
 # ── READ ─────────────────────────────────────────────────
@@ -187,4 +189,4 @@ def get_past_incidents_all():
         .order_by(PastIncident.created_at.desc()).all()
     return [r.to_dict() for r in rows]
 
-    
+
