@@ -1,87 +1,98 @@
--- RAN ALL BELOW QUERIES IN SUPABASE ALREADY:
+-- Enable pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
 
+-- =========================
+-- 1) INCIDENTS (LIVE TABLE)
+-- =========================
 CREATE TABLE incidents (
-  id                    TEXT PRIMARY KEY,
-  title                 TEXT NOT NULL,
-  description           TEXT,
+  id              TEXT PRIMARY KEY,
+  title           TEXT NOT NULL,
+  description     TEXT,
 
-  -- Set by Commander agent
-  severity              TEXT,          -- P0, P1, P2
-
-  -- Lifecycle status
-  status                TEXT DEFAULT 'processing',
+  severity        TEXT,
+  status          TEXT DEFAULT 'processing',
   -- processing → agents_done → assigned → resolved
 
-  -- Set by agents (LLM output)
-  agent_root_cause      TEXT,          -- what LLM thinks caused it
-  agent_resolution      TEXT,          -- what LLM suggests to fix it
-  agent_comms           TEXT,          -- Slack message that was sent
-  agent_postmortem      TEXT,          -- draft post-mortem
+  assigned_to     TEXT,
+  assigned_at     TIMESTAMP,
 
-  -- Set by human developer
-  assigned_to           TEXT,          -- developer name or email
-  assigned_at           TIMESTAMP,
+  resolved_by     TEXT,
+  resolved_at     TIMESTAMP,
 
-  human_validated       BOOLEAN,       -- true = agent was right
-  human_root_cause      TEXT,          -- actual root cause (if different)
-  human_resolution      TEXT,          -- what they actually did to fix it
-  resolved_by           TEXT,          -- who closed it
-  resolved_at           TIMESTAMP,
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW(),
 
-  created_at            TIMESTAMP DEFAULT NOW()
+  CONSTRAINT chk_incidents_severity
+    CHECK (severity IN ('P0', 'P1', 'P2') OR severity IS NULL),
+
+  CONSTRAINT chk_incidents_status
+    CHECK (status IN ('processing', 'agents_done', 'assigned', 'resolved'))
 );
 
--- INCIDENT_LOGS: live agent activity feed (unchanged)
+-- =========================
+-- 2) INCIDENT LOGS (TIMELINE)
+-- =========================
 CREATE TABLE incident_logs (
   id            SERIAL PRIMARY KEY,
-  incident_id   TEXT,
+  incident_id   TEXT NOT NULL,
   agent         TEXT,
   action        TEXT,
   detail        TEXT,
-  created_at    TIMESTAMP DEFAULT NOW()
+  created_at    TIMESTAMP DEFAULT NOW(),
+
+  CONSTRAINT fk_incident_logs_incident
+    FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE
 );
 
--- PAST_INCIDENTS: historical memory for Triage to search
--- Now has BOTH agent guess AND human truth
+-- =========================
+-- 3) PAST INCIDENTS (ANALYSIS + MEMORY + VECTOR SEARCH)
+-- =========================
 CREATE TABLE past_incidents (
   id                    SERIAL PRIMARY KEY,
-  incident_id           TEXT,   -- nullable: real incident if available
+  incident_id           TEXT UNIQUE,
 
   title                 TEXT,
   description           TEXT,
   severity              TEXT,
   category              TEXT,
 
-  -- What the agent guessed
+  -- Agent output
   agent_root_cause      TEXT,
   agent_resolution      TEXT,
+  agent_comms           TEXT,
+  agent_postmortem      TEXT,
 
-  -- What actually happened (human verified)
+  -- Human final truth
   human_root_cause      TEXT,
   human_resolution      TEXT,
 
-  -- Was agent correct?
+  -- AI evaluation
   agent_was_correct     BOOLEAN,
 
-  -- For search ranking
-  resolution_confidence TEXT,  -- 'human_verified' or 'agent_only'
+  -- Trust / source quality
+  resolution_confidence TEXT,
+  -- 'human_verified' or 'agent_only'
+
+  -- Vector embedding for semantic search
+  embedding             VECTOR(768),
 
   created_at            TIMESTAMP DEFAULT NOW(),
+  updated_at            TIMESTAMP DEFAULT NOW(),
 
   CONSTRAINT fk_past_incidents_incident
-    FOREIGN KEY (incident_id) REFERENCES incidents(id)
+    FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE SET NULL,
+
+  CONSTRAINT chk_past_incidents_severity
+    CHECK (severity IN ('P0', 'P1', 'P2') OR severity IS NULL),
+
+  CONSTRAINT chk_past_incidents_resolution_confidence
+    CHECK (resolution_confidence IN ('human_verified', 'agent_only') OR resolution_confidence IS NULL)
 );
 
--- ADDING FORIEGN KEY TO incident_logs & past_incidents
-ALTER TABLE incident_logs
-ADD CONSTRAINT fk_incident_logs_incident
-FOREIGN KEY (incident_id) REFERENCES incidents(id); 
+-- =========================
+-- INDEXES
+-- =========================
 
-ALTER TABLE past_incidents
-ADD CONSTRAINT fk_past_incidents_incident
-FOREIGN KEY (incident_id) REFERENCES incidents(id);
-
--- ADDING INDEXING TO ALL THE TABLES
 -- incidents
 CREATE INDEX idx_incidents_status ON incidents(status);
 CREATE INDEX idx_incidents_severity ON incidents(severity);
@@ -94,8 +105,8 @@ CREATE INDEX idx_incident_logs_agent ON incident_logs(agent);
 CREATE INDEX idx_incident_logs_created_at ON incident_logs(created_at DESC);
 
 -- past_incidents
+CREATE INDEX idx_past_incidents_incident_id ON past_incidents(incident_id);
 CREATE INDEX idx_past_incidents_category ON past_incidents(category);
 CREATE INDEX idx_past_incidents_severity ON past_incidents(severity);
 CREATE INDEX idx_past_incidents_resolution_confidence ON past_incidents(resolution_confidence);
 CREATE INDEX idx_past_incidents_created_at ON past_incidents(created_at DESC);
-
