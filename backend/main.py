@@ -1,11 +1,13 @@
-# backend/main.py
 import threading
 import uuid
+import asyncio
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from models import db
 from dotenv import load_dotenv
-import os
+
+# 1. Import DB and Models
+from models import db
 
 load_dotenv()
 
@@ -13,23 +15,21 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-CORS(app)           # allow React (port 5173) to call this server
+CORS(app)
+
 db.init_app(app)
 
-# Create tables on first run if they don't exist
-with app.app_context():
-    db.create_all()
+# 2. Import DB Tools (Now that the file exists!)
+from tools.db_tools import (
+    save_incident, agents_done, assign_incident,
+    resolve_incident, get_incident, get_logs, list_incidents
+)
 
-from tools.db_tools import (save_incident, agents_done, assign_incident,
-                             resolve_incident, get_incident,
-                             get_logs, list_incidents)
-
-
-# ── TRIGGER ──────────────────────────────────────────────
+# ── TRIGGER ENDPOINT ──────────────────────────────────────
 @app.route("/api/incident/trigger", methods=["POST"])
 def trigger_incident():
     data = request.get_json()
-    title       = data.get("title", "")
+    title = data.get("title", "")
     description = data.get("description", "")
 
     if not title:
@@ -37,41 +37,59 @@ def trigger_incident():
 
     incident_id = "INC-" + str(uuid.uuid4())[:8].upper()
 
-    with app.app_context():
-        save_incident(incident_id, title, description)
+    # Save to DB immediately
+    save_incident(incident_id, title, description)
 
-    # Run agents in a background thread so we return immediately
+    # Run agents in background - passing app_context is CRITICAL
     thread = threading.Thread(
         target=run_agents_background,
-        args=(incident_id, title, description)
+        args=(app.app_context(), incident_id, title, description)
     )
     thread.start()
 
     return jsonify({"incident_id": incident_id}), 201
 
 
-def run_agents_background(incident_id, title, description):
+def run_agents_background(app_context, incident_id, title, description):
     """Runs inside a thread — needs its own app context."""
-    import asyncio
-    with app.app_context():
+    with app_context:
         asyncio.run(process_incident(incident_id, title, description))
 
 
 async def process_incident(incident_id, title, description):
-    from agents.commander import classify_severity, run_all_agents
-    severity = await classify_severity(title, description)
-    results  = await run_all_agents(incident_id, title, description, severity)
-    agents_done(
-        incident_id,
-        severity,
-        results["triage_root_cause"],
-        results["triage_resolution"],
-        results["comms"],
-        results["docs"]
-    )
+    """
+    This is where your teammate will plug in Gemini.
+    For now, we use MOCK functions so the app doesn't crash.
+    """
+    try:
+        # Once teammate finishes agents/commander.py, uncomment these:
+        # from agents.commander import classify_severity, run_all_agents
+        # severity = await classify_severity(title, description)
+        # results  = await run_all_agents(incident_id, title, description, severity)
+        
+        # MOCK DATA for testing until teammate is done:
+        await asyncio.sleep(3) # Simulate AI thinking
+        severity = "P1"
+        results = {
+            "triage_root_cause": "Mock Root Cause: Potential DB deadlocks.",
+            "triage_resolution": "Mock Fix: Scaling connection pool.",
+            "comms": "Mock Slack Message: Investigating P1 incident.",
+            "docs": "Mock Post-mortem: Draft generated."
+        }
+
+        agents_done(
+            incident_id,
+            severity,
+            results["triage_root_cause"],
+            results["triage_resolution"],
+            results["comms"],
+            results["docs"]
+        )
+    except Exception as e:
+        print(f"Error in background agents: {e}")
 
 
-# ── ASSIGN ───────────────────────────────────────────────
+# ── ASSIGN & RESOLVE ─────────────────────────────────────
 @app.route("/api/incident/<incident_id>/assign", methods=["PATCH"])
 def assign(incident_id):
     data = request.get_json()
@@ -81,8 +99,6 @@ def assign(incident_id):
     assign_incident(incident_id, developer)
     return jsonify({"status": "assigned", "assigned_to": developer})
 
-
-# ── RESOLVE ──────────────────────────────────────────────
 @app.route("/api/incident/<incident_id>/resolve", methods=["PATCH"])
 def resolve(incident_id):
     data = request.get_json()

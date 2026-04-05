@@ -1,53 +1,46 @@
 # backend/tools/search_tool.py
-from models import PastIncident
+import os
+from google import genai
+from google.genai import types 
+from models import db, PastIncident
+from sqlalchemy import text
+from dotenv import load_dotenv
 
-def search_similar_incidents(query_text):
+load_dotenv()
+
+# Initialize the Gemini Client 
+# We remove http_options to let it default to v1beta, which supports the new model
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+
+def get_embedding(text_to_embed):
     """
-    Keyword search using SQLAlchemy ORM — no raw SQL needed.
-    Prefers human_verified results over agent_only.
-    Falls back gracefully if DB is empty.
+    Uses gemini-embedding-001 on the v1beta endpoint.
+    Truncates the native 3072 dimensions to 768 to fit your DB schema.
     """
-    stop_words = {
-        'the','a','an','is','are','was','and','or',
-        'for','in','on','at','to','all','not','no'
-    }
-    words = [
-        w.lower() for w in query_text.split()
-        if w.lower() not in stop_words and len(w) > 3
-    ]
+    try:
+        response = client.models.embed_content(
+            model="gemini-embedding-001",
+            contents=[text_to_embed],
+            config=types.EmbedContentConfig(output_dimensionality=768)
+        )
+        return response.embeddings[0].values
+    except Exception as e:
+        print(f"Embedding failed: {e}")
+        raise e
 
-    if not words:
-        return "No similar past incidents found."
+def search_similar_incidents(query, limit=3):
+    """Performs a Cosine Similarity search in Cloud SQL."""
+    query_vector = get_embedding(query)
+    
+    results = db.session.query(
+        PastIncident,
+        (1 - PastIncident.embedding.cosine_distance(query_vector)).label("similarity")
+    ).order_by(text("similarity DESC")).limit(limit).all()
 
-    # Build OR filter across title and root cause columns
-    from sqlalchemy import or_
-    filters = []
-    for word in words[:5]:
-        like = f"%{word}%"
-        filters.append(PastIncident.title.ilike(like))
-        filters.append(PastIncident.human_root_cause.ilike(like))
-        filters.append(PastIncident.agent_root_cause.ilike(like))
-
-    results = PastIncident.query \
-        .filter(or_(*filters)) \
-        .order_by(
-            # human_verified ranked first
-            PastIncident.resolution_confidence.desc(),
-            PastIncident.created_at.desc()
-        ) \
-        .limit(3).all()
-
-    if not results:
-        return "No similar past incidents found in history."
-
-    output = "SIMILAR PAST INCIDENTS:\n\n"
-    for r in results:
-        best_root = r.human_root_cause or r.agent_root_cause
-        best_fix  = r.human_resolution or r.agent_resolution
-        verified  = "Human verified" if r.agent_was_correct else \
-                    ("Human corrected" if r.human_root_cause else "Agent suggestion only")
-        output += f"Title: {r.title}\n"
-        output += f"Root cause: {best_root}\n"
-        output += f"Resolution: {best_fix}\n"
-        output += f"Confidence: {verified}\n\n"
-    return output
+    formatted_results = []
+    for row, score in results:
+        data = row.to_dict()
+        data["similarity_score"] = round(float(score), 4)
+        formatted_results.append(data)
+    
+    return formatted_results
