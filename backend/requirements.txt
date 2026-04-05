@@ -1,10 +1,34 @@
+# Web server
 Flask==3.0.3
 Flask-Cors==5.0.0
 Flask-SQLAlchemy==3.1.1
 SQLAlchemy==2.0.36
-python-dotenv==1.0.1
-google-genai==1.66.0
-pgvector==0.4.2
-psycopg[binary]==3.2.6
 gunicorn==23.0.0
-psycopg2-binary==2.9.11
+
+# Database
+psycopg[binary]==3.2.6
+pgvector==0.4.2
+
+# ADK + Gemini
+google-adk==1.28.1
+toolbox-adk>=1.0.0,<2.0.0
+google-cloud-aiplatform[agent_engines]>=1.132.0,<2.0.0
+google-genai>=1.70.0,<2.0.0
+mcp>=1.23.0,<2.0.0
+
+# Google auth & APIs
+google-auth[pyopenssl]>=2.47.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.157.0,<3.0.0
+
+# Async HTTP
+httpx>=0.27.0,<1.0.0
+requests>=2.32.4,<3.0.0
+
+# Validation & config
+pydantic>=2.12.0,<3.0.0
+python-dotenv==1.0.1
+numpy>=1.24.4
+
+# PDF parsing
+pypdf==4.3.0
