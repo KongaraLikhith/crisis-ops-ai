@@ -1,87 +1,97 @@
+// ── ResolvePanel.jsx ────────────────────────────────────────────────────
+// Only visible when incident status is "assigned".
+// Shows the agent's root cause for reference, asks if it was correct,
+// collects human resolution steps, and calls PATCH resolve API.
+// ─────────────────────────────────────────────────────────────────────────
 import { useState } from 'react'
-import axios from 'axios'
-
-const BASE = 'http://localhost:8000'
+import { resolveIncident } from '../api'
 
 export default function ResolvePanel({ incident, onResolved }) {
-  const [resolvedBy, setResolvedBy]         = useState('')
-  const [agentWasCorrect, setAgentCorrect]  = useState(null)   // true / false / null
-  const [humanRootCause, setHumanRootCause] = useState('')
+  const [resolvedBy, setResolvedBy]           = useState('')
+  const [agentWasCorrect, setAgentCorrect]    = useState(null)   // true / false / null
+  const [humanRootCause, setHumanRootCause]   = useState('')
   const [humanResolution, setHumanResolution] = useState('')
-  const [submitting, setSubmitting]         = useState(false)
+  const [submitting, setSubmitting]           = useState(false)
+
+  const canSubmit = resolvedBy && agentWasCorrect !== null && humanResolution
 
   const handleResolve = async () => {
-    if (!resolvedBy || agentWasCorrect === null || !humanResolution) return
+    if (!canSubmit) return
     setSubmitting(true)
-    await axios.patch(`${BASE}/api/incident/${incident.id}/resolve`, {
-      resolved_by:      resolvedBy,
-      agent_was_correct: agentWasCorrect,
-      human_root_cause: agentWasCorrect ? null : humanRootCause,
-      human_resolution: humanResolution,
-    })
-    setSubmitting(false)
-    onResolved()
+    try {
+      await resolveIncident(incident.id, {
+        resolved_by:       resolvedBy,
+        agent_was_correct: agentWasCorrect,
+        human_root_cause:  agentWasCorrect ? null : humanRootCause,
+        human_resolution:  humanResolution,
+      })
+      onResolved()                 // tell parent to refresh incident
+    } catch {
+      console.error('Failed to resolve')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
-    <div style={{padding:'14px',display:'flex',flexDirection:'column',gap:'12px'}}>
+    <div className="rounded-xl border border-[#e5e3dc] bg-white p-4 mt-3 space-y-3">
+      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
+        Resolve Incident
+      </p>
 
       {/* Agent's suggestion — shown for reference */}
-      <div style={{padding:'10px',background:'#f0eeff',borderRadius:'8px',
-                   borderLeft:'3px solid #7F77DD'}}>
-        <div style={{fontSize:'11px',fontWeight:'500',color:'#534AB7',marginBottom:'4px'}}>
+      <div className="rounded-lg border-l-[3px] border-l-[#7F77DD] bg-[#f0eeff] p-3">
+        <p className="text-[10px] font-semibold text-[#7F77DD] mb-1">
           Agent's root cause suggestion
-        </div>
-        <div style={{fontSize:'12px',color:'#333'}}>
+        </p>
+        <p className="text-[12px] text-gray-700">
           {incident.agent_root_cause || 'Not available'}
-        </div>
-        <div style={{fontSize:'11px',fontWeight:'500',color:'#534AB7',
-                     marginTop:'8px',marginBottom:'4px'}}>
+        </p>
+        <p className="text-[10px] font-semibold text-[#7F77DD] mt-2 mb-1">
           Agent's suggested fix
-        </div>
-        <div style={{fontSize:'12px',color:'#333'}}>
+        </p>
+        <p className="text-[12px] text-gray-700">
           {incident.agent_resolution || 'Not available'}
-        </div>
+        </p>
       </div>
 
       {/* Was the agent correct? */}
       <div>
-        <div style={{fontSize:'12px',fontWeight:'500',marginBottom:'8px'}}>
+        <p className="text-[12px] font-medium text-gray-700 mb-2">
           Was the agent's root cause correct?
-        </div>
-        <div style={{display:'flex',gap:'8px'}}>
+        </p>
+        <div className="flex gap-2">
           <button
             onClick={() => { setAgentCorrect(true); setHumanRootCause('') }}
-            style={{
-              flex:1, padding:'8px', borderRadius:'8px', cursor:'pointer',
-              border: agentWasCorrect === true
-                ? '2px solid #1D9E75' : '1px solid #ddd',
-              background: agentWasCorrect === true ? '#e6f7f1' : 'white',
-              color: agentWasCorrect === true ? '#0F6E56' : '#555',
-              fontSize:'12px', fontWeight:'500'
-            }}>
-            Yes — agent was right
+            className={`
+              flex-1 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer
+              ${agentWasCorrect === true
+                ? 'border-2 border-[#1D9E75] bg-[#e6f7f1] text-[#0F6E56]'
+                : 'border border-[#e5e3dc] bg-white text-gray-500 hover:border-[#1D9E75]'
+              }
+            `}
+          >
+            ✓ Yes — agent was right
           </button>
           <button
             onClick={() => setAgentCorrect(false)}
-            style={{
-              flex:1, padding:'8px', borderRadius:'8px', cursor:'pointer',
-              border: agentWasCorrect === false
-                ? '2px solid #e53e3e' : '1px solid #ddd',
-              background: agentWasCorrect === false ? '#fde8e8' : 'white',
-              color: agentWasCorrect === false ? '#c53030' : '#555',
-              fontSize:'12px', fontWeight:'500'
-            }}>
-            No — actual cause was different
+            className={`
+              flex-1 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer
+              ${agentWasCorrect === false
+                ? 'border-2 border-[#c53030] bg-[#fde8e8] text-[#c53030]'
+                : 'border border-[#e5e3dc] bg-white text-gray-500 hover:border-[#c53030]'
+              }
+            `}
+          >
+            ✗ No — actual cause was different
           </button>
         </div>
       </div>
 
-      {/* Only show if agent was WRONG */}
+      {/* Only show if agent was WRONG — collect actual root cause */}
       {agentWasCorrect === false && (
         <div>
-          <label style={{fontSize:'12px',fontWeight:'500',
-                         display:'block',marginBottom:'4px'}}>
+          <label className="text-[12px] font-medium text-gray-700 block mb-1">
             Actual root cause
           </label>
           <textarea
@@ -89,52 +99,51 @@ export default function ResolvePanel({ incident, onResolved }) {
             onChange={e => setHumanRootCause(e.target.value)}
             placeholder="What actually caused this incident?"
             rows={2}
-            style={{width:'100%',padding:'8px',borderRadius:'8px',
-                    border:'1px solid #ddd',fontSize:'12px',resize:'vertical'}}
+            className="w-full text-xs px-2.5 py-2 rounded-lg border border-[#e5e3dc] resize-none focus:outline-none focus:border-[#7F77DD] placeholder:text-gray-400"
           />
         </div>
       )}
 
-      {/* Always required — what steps did they actually take */}
+      {/* Resolution steps — always required */}
       <div>
-        <label style={{fontSize:'12px',fontWeight:'500',
-                       display:'block',marginBottom:'4px'}}>
+        <label className="text-[12px] font-medium text-gray-700 block mb-1">
           What steps did you take to fix it?
         </label>
         <textarea
           value={humanResolution}
           onChange={e => setHumanResolution(e.target.value)}
-          placeholder="1. Restarted the auth service&#10;2. Added the missing env var&#10;3. Verified logins working"
+          placeholder={"1. Restarted the auth service\n2. Added the missing env var\n3. Verified logins working"}
           rows={4}
-          style={{width:'100%',padding:'8px',borderRadius:'8px',
-                  border:'1px solid #ddd',fontSize:'12px',resize:'vertical'}}
+          className="w-full text-xs px-2.5 py-2 rounded-lg border border-[#e5e3dc] resize-none focus:outline-none focus:border-[#7F77DD] placeholder:text-gray-400"
         />
       </div>
 
+      {/* Name input */}
       <div>
-        <label style={{fontSize:'12px',fontWeight:'500',
-                       display:'block',marginBottom:'4px'}}>
+        <label className="text-[12px] font-medium text-gray-700 block mb-1">
           Your name
         </label>
         <input
           value={resolvedBy}
           onChange={e => setResolvedBy(e.target.value)}
           placeholder="e.g. Rahul"
-          style={{width:'100%',padding:'8px',borderRadius:'8px',
-                  border:'1px solid #ddd',fontSize:'12px'}}
+          className="w-full text-xs px-2.5 py-2 rounded-lg border border-[#e5e3dc] focus:outline-none focus:border-[#7F77DD] placeholder:text-gray-400"
         />
       </div>
 
+      {/* Submit button */}
       <button
         onClick={handleResolve}
-        disabled={submitting || !resolvedBy || agentWasCorrect === null || !humanResolution}
-        style={{
-          padding:'10px', borderRadius:'8px', border:'none',
-          background: submitting ? '#ccc' : '#1D9E75',
-          color:'white', fontSize:'13px', fontWeight:'500',
-          cursor: submitting ? 'default' : 'pointer'
-        }}>
-        {submitting ? 'Saving...' : 'Mark as Resolved & Save to History'}
+        disabled={!canSubmit || submitting}
+        className={`
+          w-full py-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer
+          ${canSubmit && !submitting
+            ? 'bg-[#1D9E75] text-white hover:bg-[#178a65]'
+            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+          }
+        `}
+      >
+        {submitting ? 'Saving…' : 'Mark Resolved & Save to History'}
       </button>
     </div>
   )
