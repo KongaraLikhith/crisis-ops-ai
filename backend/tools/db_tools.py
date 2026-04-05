@@ -1,4 +1,3 @@
-# backend/tools/db_tools.py
 from datetime import datetime
 from models import db, Incident, IncidentLog, PastIncident
 
@@ -10,7 +9,8 @@ def save_incident(incident_id, title, description):
         title=title,
         description=description,
         status="processing",
-        created_at=datetime.utcnow()
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
     )
     db.session.add(inc)
     db.session.commit()
@@ -32,16 +32,46 @@ def log_action(incident_id, agent, action, detail):
 # ── AFTER ALL AGENTS FINISH ──────────────────────────────
 def agents_done(incident_id, severity,
                 agent_root_cause, agent_resolution,
-                agent_comms, agent_postmortem):
+                agent_comms, agent_postmortem,
+                category=None):
     inc = Incident.query.get(incident_id)
     if not inc:
         return
-    inc.severity         = severity
-    inc.status           = "agents_done"
-    inc.agent_root_cause = agent_root_cause
-    inc.agent_resolution = agent_resolution
-    inc.agent_comms      = agent_comms
-    inc.agent_postmortem = agent_postmortem
+
+    inc.severity = severity
+    inc.status = "agents_done"
+    inc.updated_at = datetime.utcnow()
+
+    # Store agent analysis in past_incidents
+    past = PastIncident.query.filter_by(incident_id=incident_id).first()
+
+    if not past:
+        past = PastIncident(
+            incident_id=inc.id,
+            title=inc.title,
+            description=inc.description,
+            severity=severity,
+            category=category,
+            agent_root_cause=agent_root_cause,
+            agent_resolution=agent_resolution,
+            agent_comms=agent_comms,
+            agent_postmortem=agent_postmortem,
+            resolution_confidence="agent_only",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.session.add(past)
+    else:
+        past.title = inc.title
+        past.description = inc.description
+        past.severity = severity
+        past.category = category or past.category
+        past.agent_root_cause = agent_root_cause
+        past.agent_resolution = agent_resolution
+        past.agent_comms = agent_comms
+        past.agent_postmortem = agent_postmortem
+        past.updated_at = datetime.utcnow()
+
     db.session.commit()
 
 
@@ -50,52 +80,58 @@ def assign_incident(incident_id, developer_name):
     inc = Incident.query.get(incident_id)
     if not inc:
         return
-    inc.status      = "assigned"
+    inc.status = "assigned"
     inc.assigned_to = developer_name
     inc.assigned_at = datetime.utcnow()
+    inc.updated_at = datetime.utcnow()
     db.session.commit()
 
 
 # ── RESOLVE ──────────────────────────────────────────────
 def resolve_incident(incident_id, resolved_by,
-                     human_validated,
+                     agent_was_correct,
                      human_root_cause,
                      human_resolution):
     inc = Incident.query.get(incident_id)
     if not inc:
         return
-    inc.status           = "resolved"
-    inc.resolved_by      = resolved_by
-    inc.resolved_at      = datetime.utcnow()
-    inc.human_validated  = human_validated
-    inc.human_root_cause = human_root_cause
-    inc.human_resolution = human_resolution
+
+    inc.status = "resolved"
+    inc.resolved_by = resolved_by
+    inc.resolved_at = datetime.utcnow()
+    inc.updated_at = datetime.utcnow()
     db.session.commit()
 
-    # Graduate into past_incidents using the FK relationship
-    _graduate_to_history(inc, human_validated,
-                         human_root_cause, human_resolution)
+    # Graduate/update into past_incidents
+    _graduate_to_history(
+        inc,
+        agent_was_correct,
+        human_root_cause,
+        human_resolution
+    )
 
 
 def _graduate_to_history(inc, agent_was_correct,
-                          human_root_cause, human_resolution):
-    confidence = "human_verified" if agent_was_correct else "human_verified"
-    # both cases are human_verified — agent_only is only for seeded data
+                         human_root_cause, human_resolution):
+    past = PastIncident.query.filter_by(incident_id=inc.id).first()
 
-    past = PastIncident(
-        incident_id        = inc.id,          # FK to incidents table
-        title              = inc.title,
-        description        = inc.description,
-        severity           = inc.severity,
-        agent_root_cause   = inc.agent_root_cause,
-        agent_resolution   = inc.agent_resolution,
-        human_root_cause   = human_root_cause or inc.agent_root_cause,
-        human_resolution   = human_resolution,
-        agent_was_correct  = agent_was_correct,
-        resolution_confidence = confidence,
-        created_at         = datetime.utcnow()
-    )
-    db.session.add(past)
+    if not past:
+        past = PastIncident(
+            incident_id=inc.id,
+            title=inc.title,
+            description=inc.description,
+            severity=inc.severity,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.session.add(past)
+
+    past.human_root_cause = human_root_cause or past.agent_root_cause
+    past.human_resolution = human_resolution
+    past.agent_was_correct = agent_was_correct
+    past.resolution_confidence = "human_verified"
+    past.updated_at = datetime.utcnow()
+
     db.session.commit()
 
 

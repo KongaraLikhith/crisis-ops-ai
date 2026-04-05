@@ -1,57 +1,46 @@
-from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import CheckConstraint, ForeignKey, Text, Boolean, Integer, TIMESTAMP
-from sqlalchemy.orm import relationship
+from sqlalchemy import CheckConstraint, Index, text
+from sqlalchemy.sql import func
+from pgvector.sqlalchemy import Vector
 
 db = SQLAlchemy()
 
-
-# ============================================================
-# INCIDENTS TABLE
-# ============================================================
+# =========================
+# 1) INCIDENTS (LIVE TABLE)
+# =========================
 class Incident(db.Model):
     __tablename__ = "incidents"
 
-    id = db.Column(Text, primary_key=True)  # e.g. INC-1001
-    title = db.Column(Text, nullable=False)
-    description = db.Column(Text, nullable=True)
+    id = db.Column(db.Text, primary_key=True)
+    title = db.Column(db.Text, nullable=False)
+    description = db.Column(db.Text)
 
-    # Set by Commander agent
-    severity = db.Column(Text, nullable=True)  # P0, P1, P2
-
-    # Lifecycle status
-    status = db.Column(Text, nullable=False, default="processing")
+    severity = db.Column(db.Text)
+    status = db.Column(db.Text, nullable=False, server_default="processing")
     # processing → agents_done → assigned → resolved
 
-    # Set by agents (LLM output)
-    agent_root_cause = db.Column(Text, nullable=True)
-    agent_resolution = db.Column(Text, nullable=True)
-    agent_comms = db.Column(Text, nullable=True)
-    agent_postmortem = db.Column(Text, nullable=True)
+    assigned_to = db.Column(db.Text)
+    assigned_at = db.Column(db.DateTime)
 
-    # Set by human developer
-    assigned_to = db.Column(Text, nullable=True)
-    assigned_at = db.Column(TIMESTAMP, nullable=True)
+    resolved_by = db.Column(db.Text)
+    resolved_at = db.Column(db.DateTime)
 
-    human_validated = db.Column(Boolean, nullable=True)
-    human_root_cause = db.Column(Text, nullable=True)
-    human_resolution = db.Column(Text, nullable=True)
-    resolved_by = db.Column(Text, nullable=True)
-    resolved_at = db.Column(TIMESTAMP, nullable=True)
-
-    created_at = db.Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, server_default=func.now())
+    updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    logs = relationship(
+    logs = db.relationship(
         "IncidentLog",
-        back_populates="incident",
+        backref="incident",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         lazy=True
     )
 
-    historical_records = relationship(
+    past_incident = db.relationship(
         "PastIncident",
-        back_populates="incident",
+        backref="incident",
+        uselist=False,
         lazy=True
     )
 
@@ -64,6 +53,10 @@ class Incident(db.Model):
             "status IN ('processing', 'agents_done', 'assigned', 'resolved')",
             name="chk_incidents_status"
         ),
+        Index("idx_incidents_status", "status"),
+        Index("idx_incidents_severity", "severity"),
+        Index("idx_incidents_created_at", db.text("created_at DESC")),
+        Index("idx_incidents_assigned_to", "assigned_to"),
     )
 
     def __repr__(self):
@@ -76,43 +69,39 @@ class Incident(db.Model):
             "description": self.description,
             "severity": self.severity,
             "status": self.status,
-            "agent_root_cause": self.agent_root_cause,
-            "agent_resolution": self.agent_resolution,
-            "agent_comms": self.agent_comms,
-            "agent_postmortem": self.agent_postmortem,
             "assigned_to": self.assigned_to,
             "assigned_at": self.assigned_at.isoformat() if self.assigned_at else None,
-            "human_validated": self.human_validated,
-            "human_root_cause": self.human_root_cause,
-            "human_resolution": self.human_resolution,
             "resolved_by": self.resolved_by,
             "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
-# ============================================================
-# INCIDENT_LOGS TABLE
-# ============================================================
+# =========================
+# 2) INCIDENT LOGS (TIMELINE)
+# =========================
 class IncidentLog(db.Model):
     __tablename__ = "incident_logs"
 
-    id = db.Column(Integer, primary_key=True, autoincrement=True)
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     incident_id = db.Column(
-        Text,
-        ForeignKey("incidents.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True
+        db.Text,
+        db.ForeignKey("incidents.id", ondelete="CASCADE"),
+        nullable=False
     )
 
-    agent = db.Column(Text, nullable=True)
-    action = db.Column(Text, nullable=True)
-    detail = db.Column(Text, nullable=True)
+    agent = db.Column(db.Text)
+    action = db.Column(db.Text)
+    detail = db.Column(db.Text)
 
-    created_at = db.Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, server_default=func.now())
 
-    # Relationship
-    incident = relationship("Incident", back_populates="logs")
+    __table_args__ = (
+        Index("idx_incident_logs_incident_id", "incident_id"),
+        Index("idx_incident_logs_agent", "agent"),
+        Index("idx_incident_logs_created_at", db.text("created_at DESC")),
+    )
 
     def __repr__(self):
         return f"<IncidentLog {self.id} - {self.incident_id}>"
@@ -128,45 +117,47 @@ class IncidentLog(db.Model):
         }
 
 
-# ============================================================
-# PAST_INCIDENTS TABLE
-# ============================================================
+# =========================
+# 3) PAST INCIDENTS (ANALYSIS + MEMORY + VECTOR SEARCH)
+# =========================
 class PastIncident(db.Model):
     __tablename__ = "past_incidents"
 
-    id = db.Column(Integer, primary_key=True, autoincrement=True)
-
-    # Nullable because some historical records may be imported/manual
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     incident_id = db.Column(
-        Text,
-        ForeignKey("incidents.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True
+        db.Text,
+        db.ForeignKey("incidents.id", ondelete="SET NULL"),
+        unique=True,
+        nullable=True
     )
 
-    title = db.Column(Text, nullable=True)
-    description = db.Column(Text, nullable=True)
-    severity = db.Column(Text, nullable=True)
-    category = db.Column(Text, nullable=True)
+    title = db.Column(db.Text)
+    description = db.Column(db.Text)
+    severity = db.Column(db.Text)
+    category = db.Column(db.Text)
 
-    # What the agent guessed
-    agent_root_cause = db.Column(Text, nullable=True)
-    agent_resolution = db.Column(Text, nullable=True)
+    # Agent output
+    agent_root_cause = db.Column(db.Text)
+    agent_resolution = db.Column(db.Text)
+    agent_comms = db.Column(db.Text)
+    agent_postmortem = db.Column(db.Text)
 
-    # What actually happened
-    human_root_cause = db.Column(Text, nullable=True)
-    human_resolution = db.Column(Text, nullable=True)
+    # Human final truth
+    human_root_cause = db.Column(db.Text)
+    human_resolution = db.Column(db.Text)
 
-    # Was the agent correct?
-    agent_was_correct = db.Column(Boolean, nullable=True)
+    # AI evaluation
+    agent_was_correct = db.Column(db.Boolean)
 
-    # human_verified / agent_only
-    resolution_confidence = db.Column(Text, nullable=True)
+    # Trust / source quality
+    resolution_confidence = db.Column(db.Text)
+    # 'human_verified' or 'agent_only'
 
-    created_at = db.Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
+    # Vector embedding for semantic search
+    embedding = db.Column(Vector(768))
 
-    # Relationship
-    incident = relationship("Incident", back_populates="historical_records")
+    created_at = db.Column(db.DateTime, server_default=func.now())
+    updated_at = db.Column(db.DateTime, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         CheckConstraint(
@@ -175,8 +166,13 @@ class PastIncident(db.Model):
         ),
         CheckConstraint(
             "resolution_confidence IN ('human_verified', 'agent_only') OR resolution_confidence IS NULL",
-            name="chk_past_incidents_confidence"
+            name="chk_past_incidents_resolution_confidence"
         ),
+        Index("idx_past_incidents_incident_id", "incident_id"),
+        Index("idx_past_incidents_category", "category"),
+        Index("idx_past_incidents_severity", "severity"),
+        Index("idx_past_incidents_resolution_confidence", "resolution_confidence"),
+        Index("idx_past_incidents_created_at", db.text("created_at DESC")),
     )
 
     def __repr__(self):
@@ -192,9 +188,13 @@ class PastIncident(db.Model):
             "category": self.category,
             "agent_root_cause": self.agent_root_cause,
             "agent_resolution": self.agent_resolution,
+            "agent_comms": self.agent_comms,
+            "agent_postmortem": self.agent_postmortem,
             "human_root_cause": self.human_root_cause,
             "human_resolution": self.human_resolution,
             "agent_was_correct": self.agent_was_correct,
             "resolution_confidence": self.resolution_confidence,
+            "embedding": self.embedding,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
