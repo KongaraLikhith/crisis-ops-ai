@@ -33,20 +33,24 @@ def search_similar_incidents(query_text, limit=3, return_mode="text"):
     Search similar incidents using:
     1) Vector search (preferred)
     2) Keyword fallback
-
-    return_mode:
-      - "text" -> returns LLM-friendly formatted string
-      - "json" -> returns list of dicts
     """
+
     try:
+        print(f"[DEBUG] Searching for: {query_text}")
+
         query_vector = get_embedding(query_text)
         results = _vector_search(query_vector, limit=limit)
+
+        print(f"[DEBUG] Vector results: {len(results)}")
+
         if results:
             return _format_results(results, mode="vector", return_mode=return_mode)
+
     except Exception as e:
         print(f"[WARN] Vector search failed, using keyword fallback: {str(e)}")
 
     results = _keyword_search(query_text, limit=limit)
+
     if results:
         return _format_results(results, mode="keyword", return_mode=return_mode)
 
@@ -60,20 +64,26 @@ def search_similar_incidents(query_text, limit=3, return_mode="text"):
 def _vector_search(query_vector, limit=3):
     """
     Semantic search using pgvector cosine similarity.
-    Prefer human_verified results first, then highest similarity.
     """
+
+    similarity_expr = (1 - PastIncident.embedding.cosine_distance(query_vector))
+
     rows = (
         db.session.query(
             PastIncident,
-            (1 - PastIncident.embedding.cosine_distance(query_vector)).label("similarity")
+            similarity_expr.label("similarity")
         )
-        .filter(PastIncident.embedding.isnot(None))
+        .filter(
+            PastIncident.embedding.isnot(None),
+            similarity_expr > 0.65  # threshold to remove weak matches
+        )
         .order_by(
+            similarity_expr.desc(),  # relevance first
             case(
                 (PastIncident.resolution_confidence == "human_verified", 0),
                 else_=1
             ),
-            (1 - PastIncident.embedding.cosine_distance(query_vector)).desc()
+            PastIncident.created_at.desc()
         )
         .limit(limit)
         .all()
@@ -174,8 +184,9 @@ def _format_results(rows, mode="vector", return_mode="text"):
         output += f"   Root cause: {item['root_cause']}\n"
         output += f"   Resolution: {item['resolution']}\n"
         output += f"   Confidence: {item['confidence']}\n"
-        if item["similarity_score"] is not None:
+        if mode == "vector" and item["similarity_score"] is not None:
             output += f"   Similarity Score: {item['similarity_score']}\n"
-        output += "\n"
+        elif mode == "keyword":
+            output += f"   Similarity Score: fallback\n"
 
     return output.strip()
