@@ -7,7 +7,7 @@ async def classify_severity(title, description):
     prompt = f"""Classify this incident as P0, P1, or P2. Reply with ONLY those 3 characters.
 P0 = everything down, all users affected
 P1 = major feature broken, many users affected
-P2 = minor issue, few users affected
+P2 = minor issue, few users affectede
 Incident: {title}
 Description: {description}"""
     result = llm.invoke(prompt)
