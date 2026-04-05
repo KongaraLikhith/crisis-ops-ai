@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* ── Custom theme tokens ─────────────────────────────────── */
+@theme {
+  --color-page: #f5f4f0;
+  --color-card-border: #e5e3dc;
+  --color-accent: #7F77DD;
+  --color-accent-light: #f0eeff;
+
+  /* Severity */
+  --color-sev-p0-bg: #fde8e8;
+  --color-sev-p0-text: #c53030;
+  --color-sev-p1-bg: #fef3c7;
+  --color-sev-p1-text: #92400e;
+  --color-sev-p2-bg: #e6f7f1;
+  --color-sev-p2-text: #276749;
+
+  /* Agent colours */
+  --color-agent-commander: #7F77DD;
+  --color-agent-triage: #1D9E75;
+  --color-agent-comms: #EF9F27;
+  --color-agent-docs: #378ADD;
+
+  /* Status badge colours */
+  --color-status-processing: #7F77DD;
+  --color-status-agents_done: #EF9F27;
+  --color-status-assigned: #378ADD;
+  --color-status-resolved: #1D9E75;
+}
+
+/* ── Base resets ──────────────────────────────────────────── */
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: var(--color-page);
+  color: #333;
+  font-size: 13px;
+}
+
+/* ── Pulsing dot animation ───────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+/* ── Agent running pulse border ──────────────────────────── */
+@keyframes pulse-border {
+  0%, 100% { border-color: #EF9F27; }
+  50% { border-color: transparent; }
+}
+.animate-pulse-border {
+  animation: pulse-border 1.2s ease-in-out infinite;
+}
+
+/* ── Scrollbar styling ───────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d4d2cc; border-radius: 2px; }
