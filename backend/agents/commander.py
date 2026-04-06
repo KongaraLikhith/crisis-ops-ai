@@ -2,7 +2,7 @@ import asyncio
 from agents.base import get_llm
 from tools.db_tools import log_action
 
-async def classify_severity(title, description):
+async def classify_severity(incident_id, title, description):
     llm = get_llm()
     prompt = f"""Classify this incident as P0, P1, or P2. Reply with ONLY those 3 characters.
 P0 = everything down, all users affected
@@ -12,7 +12,7 @@ Incident: {title}
 Description: {description}"""
     result = llm.invoke(prompt)
     severity = result.content.strip()[:2]   # safety trim
-    log_action("system", "Commander", "Severity classified", severity)
+    log_action(incident_id, "Commander", "Severity classified", severity)
     return severity
 
 async def run_all_agents(incident_id, title, description, severity):

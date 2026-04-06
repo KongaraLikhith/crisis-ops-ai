@@ -80,7 +80,7 @@ async def process_incident(incident_id, title, description):
     try:
         from agents.commander import classify_severity, run_all_agents
 
-        severity = await classify_severity(title, description)
+        severity = await classify_severity(incident_id, title, description)
         results = await run_all_agents(incident_id, title, description, severity)
 
         agents_done(
