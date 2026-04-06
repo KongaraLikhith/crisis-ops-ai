@@ -189,4 +189,9 @@ def get_past_incidents_all():
         .order_by(PastIncident.created_at.desc()).all()
     return [r.to_dict() for r in rows]
 
+def get_past_incident_from_db(incident_id):
+    rows = PastIncident.query \
+        .filter_by(incident_id=incident_id) \
+        .order_by(PastIncident.created_at.desc()).all()
+    return [r.to_dict() for r in rows]
 

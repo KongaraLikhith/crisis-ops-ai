@@ -31,6 +31,7 @@ from tools.db_tools import (
     get_incident,
     get_logs,
     list_incidents,
+    get_past_incident_from_db
 )
 
 
@@ -246,6 +247,15 @@ def get_all():
         traceback.print_exc()
         return jsonify({"error": "failed to fetch incidents", "details": str(e)}), 500
 
+@app.route("/api/get_past_incident/<incident_id>", methods=["GET"])
+def get_past_incident(incident_id):
+    try:
+        return jsonify(get_past_incident_from_db(incident_id))
+
+    except Exception as e:
+        logger.error("[ERROR] /api/pst_incidents failed: %s", str(e))
+        traceback.print_exc()
+        return jsonify({"error": "failed to fetch incidents", "details": str(e)}), 500
 
 @app.route("/api/health", methods=["GET"])
 def health():
