@@ -14,7 +14,35 @@ def save_incident(incident_id, title, description):
     )
     db.session.add(inc)
     db.session.commit()
+from datetime import datetime
+from models import db, Incident, IncidentLog, PastIncident
 
+def create_incident(incident_id: str, title: str, description: str):
+    """Alias used by commander intake agent."""
+    save_incident(incident_id, title, description)
+    # optionally return the new incident dict
+    inc = Incident.query.get(incident_id)
+    return inc.to_dict() if inc else {"incident_id": incident_id}
+
+def update_incident_status(incident_id: str, status: str):
+    inc = Incident.query.get(incident_id)
+    if not inc:
+        return {"status": "not_found"}
+    inc.status = status
+    inc.updated_at = datetime.utcnow()
+    db.session.commit()
+    return {"status": "updated", "incident_id": incident_id, "new_status": status}
+
+def log_incident_event(incident_id: str, event_type: str, detail: str):
+    """Alias wrapper over log_action with richer naming."""
+    log_action(incident_id, agent=event_type, action=event_type, detail=detail)
+    return {"status": "logged", "incident_id": incident_id, "event_type": event_type}
+
+def list_open_incidents():
+    incs = Incident.query.filter(Incident.status != "resolved") \
+                         .order_by(Incident.created_at.desc()) \
+                         .limit(50).all()
+    return [i.to_dict() for i in incs]
 
 # ── LOG (every agent calls this) ─────────────────────────
 def log_action(incident_id, agent, action, detail):
@@ -85,6 +113,7 @@ def assign_incident(incident_id, developer_name):
     inc.assigned_at = datetime.utcnow()
     inc.updated_at = datetime.utcnow()
     db.session.commit()
+
 
 
 # ── RESOLVE ──────────────────────────────────────────────
