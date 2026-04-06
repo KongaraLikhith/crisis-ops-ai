@@ -24,8 +24,8 @@ def create_war_room(incident_id: str, title: str,
 
     Returns the Google Meet link or a fallback message.
     """
-    if severity != "P0":
-        return f"War room skipped — only created for P0 (this is {severity})"
+    if severity not in {"P1", "P2"}:
+        return f"War room skipped — only created for major incidents (this is {severity})"
 
     # Check if Google Calendar is configured
     creds_path = os.path.join(os.path.dirname(__file__), "..", "credentials.json")
@@ -136,3 +136,24 @@ if __name__ == "__main__":
         duration_minutes=30
     )
     print(f"Result: {result}")
+def create_calendar_event(
+    incident_id: str,
+    title: str,
+    severity: str,
+    duration_minutes: int = 60,
+) -> str:
+    """Adapter used by commander/coordinator."""
+    return create_war_room(
+        incident_id=incident_id,
+        title=title,
+        severity=severity,
+        duration_minutes=duration_minutes,
+    )
+
+
+def get_upcoming_events() -> list[dict]:
+    """
+    Lightweight status helper for commander status queries.
+    Safe fallback when Calendar API is not configured.
+    """
+    return []
