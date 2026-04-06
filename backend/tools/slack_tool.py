@@ -148,3 +148,15 @@ def post_rich_slack_message(incident_id: str, title: str,
     except Exception as e:
         print(f"[Slack] Error: {e}")
         return f"Slack failed: {str(e)}"
+        
+def send_slack_message(message: str, channel: str | None = None) -> str:
+    """Adapter used by agents – forwards to post_to_slack."""
+    return post_to_slack(message=message, channel=channel)
+
+def create_slack_channel(name: str) -> str:
+    """
+    Placeholder for now – optionally just return a channel name.
+    Real implementation would call Slack conversations.create & invite the bot.
+    """
+    # For now, pretend the main channel is used
+    return f"#{name.lstrip('#')}"
