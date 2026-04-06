@@ -6,44 +6,46 @@ from pydantic import BaseModel
 from google.adk import Agent
 from google.adk.tools.tool_context import ToolContext
 
-# ── Local tool imports ─────────────────────────────────────────────────────────
+# Similar-incident search
+from tools.search_tool import search_similar_incidents
+
+# ── Local tool imports ────────────────────────────────────────────────────────
 from tools.db_tools import (
     get_incident,
     update_incident_status,
     log_incident_event,
 )
 
-# ── Environment ────────────────────────────────────────────────────────────────
+# ── Environment ───────────────────────────────────────────────────────────────
 model_name = os.getenv("MODEL", "gemini-2.0-flash")
 
 logger = logging.getLogger(__name__)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 # Pydantic schemas
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 
 class AffectedSystem(BaseModel):
     name: str
-    status: str                # "degraded" | "down" | "partial" | "unknown"
+    status: str                 # "degraded" | "down" | "partial" | "unknown"
     impact_description: str
 
 
 class TriageReport(BaseModel):
     incident_id: str
-    confirmed_severity: str            # P1 | P2 | P3 | P4
-    blast_radius: str                  # "localised" | "regional" | "global"
+    confirmed_severity: str             # P1 | P2 | P3 | P4
+    blast_radius: str                   # "localised" | "regional" | "global"
     affected_systems: List[AffectedSystem]
     estimated_users_impacted: Optional[int]
-    recommended_action: str            # "monitor" | "page_oncall" | "executive_brief"
+    recommended_action: str             # "monitor" | "page_oncall" | "executive_brief"
     requires_executive_notification: bool
     requires_vendor_escalation: bool
     summary: str
+    similar_incidents: List[dict] = []  # ← new field
 
-
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 # Severity keyword maps
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 
 _P1_SIGNALS = frozenset([
     "outage", "down", "data loss", "data breach", "breach", "revenue",
@@ -88,28 +90,44 @@ _SYSTEM_MAP = {
     "cloud run": ("Cloud Run",            "degraded"),
 }
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Triage tools
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Triage tools  (all accept ToolContext as first arg per ADK convention)
-# ══════════════════════════════════════════════════════════════════════════════
+def find_similar_incidents(tool_context: ToolContext, description: str) -> dict:
+    """
+    Look up similar past incidents (vector + keyword search) and stash them
+    in SIMILAR_INCIDENTS for use in the triage report.
+    """
+    try:
+        results = search_similar_incidents(
+            query_text=description,
+            limit=3,
+            return_mode="json",
+        )
+        tool_context.state["SIMILAR_INCIDENTS"] = results
+        logger.info("[Triage] find_similar_incidents: %d match(es)", len(results))
+        return {
+            "status": "ok",
+            "count": len(results),
+            "similar_incidents": results,
+        }
+    except Exception as e:
+        logger.error("[Triage] find_similar_incidents failed: %s", str(e))
+        tool_context.state["SIMILAR_INCIDENTS"] = []
+        return {
+            "status": "error",
+            "count": 0,
+            "error": str(e),
+            "similar_incidents": [],
+        }
+
 
 def assess_severity(
     tool_context: ToolContext,
     description: str,
     initial_severity: str,
 ) -> dict:
-    """
-    Re-evaluate incident severity from description text.
-
-    Scoring rules:
-    - P1: full outage / data-loss / revenue / breach signals
-    - P2: significant degradation / major feature down
-    - P3: partial / minor / workaround available
-    - P4: no strong signals — retain initial_severity if P4, else fallback to P3
-
-    Persists CONFIRMED_SEVERITY and SEVERITY_JUSTIFICATION to shared state.
-    Returns: {confirmed_severity, justification}
-    """
     desc = description.lower()
 
     if any(sig in desc for sig in _P1_SIGNALS):
@@ -122,7 +140,6 @@ def assess_severity(
         confirmed = "P3"
         justification = "P3 signals detected: minor or partial impact."
     else:
-        # No keyword match — trust the initial severity supplied by intake
         confirmed = initial_severity if initial_severity in ("P1", "P2", "P3", "P4") else "P3"
         justification = f"No override signals; retaining initial severity {confirmed}."
 
@@ -137,12 +154,6 @@ def identify_affected_systems(
     tool_context: ToolContext,
     description: str,
 ) -> dict:
-    """
-    Detect impacted systems from the incident description using keyword matching.
-
-    Persists AFFECTED_SYSTEMS (list of dicts) to shared state.
-    Returns: {affected_systems: [...], count: int}
-    """
     desc = description.lower()
     affected: list[dict] = []
     seen: set[str] = set()
@@ -176,16 +187,6 @@ def calculate_blast_radius(
     confirmed_severity: str,
     affected_system_count: int,
 ) -> dict:
-    """
-    Derive blast radius, escalation flags, and recommended action from
-    severity and the number of affected systems.
-
-    Persists BLAST_RADIUS, REQUIRES_EXEC_NOTIFICATION,
-    REQUIRES_VENDOR_ESCALATION, RECOMMENDED_ACTION to shared state.
-
-    Returns: {blast_radius, requires_executive_notification,
-              requires_vendor_escalation, recommended_action}
-    """
     if confirmed_severity == "P1" or affected_system_count >= 3:
         blast_radius = "global"
         exec_notify = True
@@ -224,18 +225,6 @@ def escalate_to_oncall(
     team: str,
     reason: str,
 ) -> dict:
-    """
-    Record an on-call escalation event in the database.
-
-    Call this when recommended_action is 'page_oncall' or 'executive_brief'.
-
-    Args:
-        team:   On-call team to page — one of: platform | security | dba | executive
-        reason: Plain-English reason for the escalation.
-
-    Persists ONCALL_PAGED=True and ONCALL_TEAM to shared state.
-    Returns: {status, team, incident_id}
-    """
     incident_id = tool_context.state.get("INCIDENT_ID", "unknown")
 
     log_incident_event(
@@ -257,17 +246,8 @@ def save_triage_report(
     tool_context: ToolContext,
     summary: str,
 ) -> dict:
-    """
-    Assemble the final TriageReport from state and persist it.
+    similar_incidents = tool_context.state.get("SIMILAR_INCIDENTS", [])
 
-    This must be the LAST triage tool called. The saved TRIAGE_REPORT key
-    is consumed by comms_agent and resolution_agent.
-
-    Args:
-        summary: One or two sentence plain-English summary of the triage findings.
-
-    Returns: {status, triage_report}
-    """
     report = TriageReport(
         incident_id=tool_context.state.get("INCIDENT_ID", "unknown"),
         confirmed_severity=tool_context.state.get("CONFIRMED_SEVERITY", "P3"),
@@ -285,11 +265,11 @@ def save_triage_report(
             "REQUIRES_VENDOR_ESCALATION", False
         ),
         summary=summary,
+        similar_incidents=similar_incidents,
     )
 
     tool_context.state["TRIAGE_REPORT"] = report.model_dump()
 
-    # Optionally reflect status in DB for severe incidents
     if report.confirmed_severity in ("P1", "P2"):
         update_incident_status(
             incident_id=report.incident_id,
@@ -302,60 +282,68 @@ def save_triage_report(
         )
 
     logger.info(
-        "[Triage] save_triage_report: id=%s severity=%s systems=%d",
+        "[Triage] save_triage_report: id=%s severity=%s systems=%d similar=%d",
         report.incident_id,
         report.confirmed_severity,
         len(report.affected_systems),
+        len(report.similar_incidents),
     )
     return {"status": "success", "triage_report": report.model_dump()}
 
-
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 # Triage Agent
-# ══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 
 triage_agent = Agent(
     name="crisis_triage",
     model=model_name,
     description=(
-        "Analyses the incident description, confirms severity, determines blast "
-        "radius, identifies affected systems, and records an initial triage report."
+        "Analyses the incident description, confirms severity, finds similar past "
+        "incidents, determines blast radius, identifies affected systems, and "
+        "records an initial triage report."
     ),
     instruction="""
 You are the CrisisOps Triage Agent.
 
 Your job is to quickly but carefully assess the impact of the active incident.
 
-━━━ STEP 1 — Confirm severity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 1 — Confirm severity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `assess_severity` with:
   - description       = { INCIDENT_DESCRIPTION }
   - initial_severity  = { INCIDENT_SEVERITY }
 
-━━━ STEP 2 — Identify affected systems ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 2 — Identify affected systems ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `identify_affected_systems` with:
   - description       = { INCIDENT_DESCRIPTION }
 
-━━━ STEP 3 — Calculate blast radius ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 3 — Find similar past incidents ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Call `find_similar_incidents` with:
+  - description       = { INCIDENT_DESCRIPTION }
+
+Use any similar incidents found to inform your recommended_action and summary.
+
+━━━ STEP 4 — Calculate blast radius ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `calculate_blast_radius` using:
   - confirmed_severity    = value from STEP 1
   - affected_system_count = length of AFFECTED_SYSTEMS from STEP 2
 
-━━━ STEP 4 — Escalate if required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 5 — Escalate if required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 If the recommended_action is 'page_oncall' or 'executive_brief', call
 `escalate_to_oncall` with:
   - team   = the most appropriate on-call team (platform | security | dba | executive)
   - reason = a short justification referencing severity and blast radius.
 
-━━━ STEP 5 — Save the triage report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 6 — Save the triage report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `save_triage_report` with a 1–2 sentence plain-English summary of:
   - confirmed severity
   - blast radius
   - key affected systems
   - recommended action
+  - whether similar past incidents suggest a likely root cause or fix
 
 Finally, present a concise triage summary back to the user.
 
-━━━ CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 INCIDENT_ID:        { INCIDENT_ID }
 INCIDENT_TITLE:     { INCIDENT_TITLE }
 INCIDENT_SEVERITY:  { INCIDENT_SEVERITY }
@@ -365,6 +353,7 @@ INCIDENT_DESCRIPTION:
     tools=[
         assess_severity,
         identify_affected_systems,
+        find_similar_incidents,   # ← new tool wired in
         calculate_blast_radius,
         escalate_to_oncall,
         save_triage_report,
