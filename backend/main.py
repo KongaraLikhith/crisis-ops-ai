@@ -13,6 +13,21 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ── Quota Mitigation (Rate Limiting) ──────────────────────
+import asyncio
+from google.adk.models.google_llm import Gemini
+
+_original_generate = Gemini.generate_content_async
+
+async def patched_generate_content_async(self, *args, **kwargs):
+    # Add a 5 second sleep before every single AI request to stay under 15 RPM
+    logger.info("[Quota] Sleeping 5s to stay under Free Tier limits...")
+    await asyncio.sleep(5)
+    async for event in _original_generate(self, *args, **kwargs):
+        yield event
+
+Gemini.generate_content_async = patched_generate_content_async
+
 # ── App setup ────────────────────────────────────────────
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
