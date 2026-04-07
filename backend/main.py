@@ -29,7 +29,8 @@ async def patched_generate_content_async(self, *args, **kwargs):
 Gemini.generate_content_async = patched_generate_content_async
 
 # ── App setup ────────────────────────────────────────────
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
+
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 CORS(app)
@@ -286,5 +287,18 @@ def health():
     return jsonify({"status": "ok"})
 
 
+# ── Serve Frontend ─────────────────────────────────────
+from flask import send_from_directory
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
+
+
 if __name__ == "__main__":
+
     app.run(debug=False, port=8000)
