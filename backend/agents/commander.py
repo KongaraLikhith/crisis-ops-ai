@@ -4,7 +4,6 @@ from google.adk import Agent
 from google.adk.agents import SequentialAgent
 from google.adk.tools.tool_context import ToolContext
 
-# ── Local tool imports ─────────────────────────────────────────────────────────
 from tools.db_tools import (
     get_incident,
     create_incident,
@@ -15,26 +14,15 @@ from tools.db_tools import (
 from tools.slack_tool import send_slack_message, create_slack_channel
 from tools.calendar_tool import create_calendar_event, get_upcoming_events
 
-# ── Sub-agent imports ──────────────────────────────────────────────────────────
 from agents.triage import triage_agent
 from agents.comms import comms_agent
 from agents.docs_agent import docs_agent
 
-# ── Environment ────────────────────────────────────────────────────────────────
 model_name = os.getenv("MODEL", "gemini-3-flash-preview")
-
 logger = logging.getLogger(__name__)
 
-# ── Severity ordering reference ────────────────────────────────────────────────
-# P0 = most critical   (full immediate response, executive notification)
-# P1 = high severity   (urgent response, team lead notification)
-# P2 = moderate        (standard response, no executive escalation)
 SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# State helpers
-# ══════════════════════════════════════════════════════════════════════════════
 
 def save_incident_to_state(
     tool_context: ToolContext,
@@ -98,17 +86,13 @@ def get_incident_context(tool_context: ToolContext) -> dict:
     Useful for sub-agents that need a summary of the active incident.
     """
     return {
-        "incident_id":   tool_context.state.get("INCIDENT_ID"),
-        "title":         tool_context.state.get("INCIDENT_TITLE"),
-        "severity":      tool_context.state.get("INCIDENT_SEVERITY"),
-        "description":   tool_context.state.get("INCIDENT_DESCRIPTION"),
-        "status":        tool_context.state.get("INCIDENT_STATUS"),
+        "incident_id": tool_context.state.get("INCIDENT_ID"),
+        "title": tool_context.state.get("INCIDENT_TITLE"),
+        "severity": tool_context.state.get("INCIDENT_SEVERITY"),
+        "description": tool_context.state.get("INCIDENT_DESCRIPTION"),
+        "status": tool_context.state.get("INCIDENT_STATUS"),
     }
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Step 1 — Intake Agent
-# ══════════════════════════════════════════════════════════════════════════════
 
 intake_agent = Agent(
     name="crisis_intake",
@@ -153,10 +137,6 @@ intake_agent = Agent(
 )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Step 2 — Coordination Agent
-# ══════════════════════════════════════════════════════════════════════════════
-
 coordination_agent = Agent(
     name="crisis_coordinator",
     model=model_name,
@@ -169,7 +149,7 @@ coordination_agent = Agent(
 
     Using the active incident from state:
     1. Call `create_slack_channel` to open a dedicated incident channel
-       named  #inc-<INCIDENT_ID>.
+       named #inc-<INCIDENT_ID>.
     2. Call `send_slack_message` to post the incident brief in that channel.
        - For P0: prefix message with 🔴 CRITICAL and page on-call + executives.
        - For P1: prefix with 🟠 HIGH and page on-call team lead.
@@ -178,7 +158,11 @@ coordination_agent = Agent(
        - P0: schedule immediately (within 5 minutes).
        - P1: schedule within 15 minutes.
        - P2: schedule within 1 hour or at next available slot.
-    4. Call `log_incident_event` to record "coordination_started" in the DB.
+    4. Call `log_incident_event` with:
+       - incident_id = { INCIDENT_ID }
+       - agent = "Coordinator"
+       - action = "coordination_started"
+       - detail = a brief summary of channel creation and bridge scheduling
 
     Keep all messages factual and urgent. Include severity and incident ID.
 
@@ -197,10 +181,6 @@ coordination_agent = Agent(
     output_key="coordination_summary",
 )
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Step 3 — Resolution Agent
-# ══════════════════════════════════════════════════════════════════════════════
 
 resolution_agent = Agent(
     name="crisis_resolver",
@@ -229,7 +209,11 @@ resolution_agent = Agent(
     4. Call `update_incident_in_state` to update shared state.
     5. Call `send_slack_message` to post a closing / status update to the
        incident channel.
-    6. Call `log_incident_event` to record "status_change" in the DB.
+    6. Call `log_incident_event` with:
+       - incident_id = { INCIDENT_ID }
+       - agent = "Resolver"
+       - action = "status_change"
+       - detail = the new incident status and any next steps
 
     Be clear and definitive. Include next steps if the incident is not resolved.
 
@@ -249,10 +233,6 @@ resolution_agent = Agent(
 )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Crisis Response Workflow  (sequential pipeline)
-# ══════════════════════════════════════════════════════════════════════════════
-
 crisis_workflow = SequentialAgent(
     name="crisis_workflow",
     description=(
@@ -260,19 +240,15 @@ crisis_workflow = SequentialAgent(
         "intake → triage + comms (parallel) → docs → coordination → resolution."
     ),
     sub_agents=[
-        intake_agent,       # Step 1: Ingest & persist the incident
-        triage_agent,       # Step 2: Assess impact and severity (P0/P1/P2)
-        comms_agent,        # Step 3: Draft stakeholder communications
-        docs_agent,         # Step 4: Generate incident runbook / log
-        coordination_agent, # Step 5: Mobilise team via Slack + Calendar
-        resolution_agent,   # Step 6: Track and close the incident
+        intake_agent,
+        triage_agent,
+        comms_agent,
+        docs_agent,
+        coordination_agent,
+        resolution_agent,
     ],
 )
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Root Commander Agent
-# ══════════════════════════════════════════════════════════════════════════════
 
 def save_incident_report(
     tool_context: ToolContext, report: str
@@ -324,5 +300,4 @@ commander = Agent(
 )
 
 
-# Alias expected by main.py  ──  `from agents.commander import root_agent`
 root_agent = commander
