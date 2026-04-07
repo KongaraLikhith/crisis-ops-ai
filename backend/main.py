@@ -90,7 +90,16 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         app_name="crisisops",
         user_id="system",
         session_id=incident_id,
-        state={"INCIDENT_REPORT": report_text},
+        state={
+            "INCIDENT_REPORT": report_text,
+            "INCIDENT_ID": incident_id,
+            "INCIDENT_TITLE": title,
+            # Pre-seed downstream keys so agent instruction templates never
+            # raise KeyError if an upstream agent fails to write its output.
+            "intake_summary": "",
+            "triage_report": "",
+            "comms_summary": "",
+        },
     )
 
     from google.genai.types import Content, Part

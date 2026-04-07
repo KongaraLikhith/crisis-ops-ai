@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -H \"Origin: http://localhost:5173\" -H \"Access-Control-Request-Method: GET\" -X OPTIONS http://localhost:8000/api/incidents -v)",
+      "Bash(curl -s http://localhost:8000/api/incidents)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(f'Total: {len\\(data\\)}'\\); print\\('Sample keys:', list\\(data[0].keys\\(\\)\\) if data else 'empty'\\)\")",
+      "Bash(curl -s http://localhost:8000/api/incident/INC-619F9245)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d.keys\\(\\)\\)\\)\")",
+      "Bash(curl -sv http://localhost:8000/api/incidents)",
+      "Bash(timeout 5 npx vite build)",
+      "Bash(npm run:*)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s http://localhost:5173/api/health)",
+      "Bash(python main.py)",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Read(//tmp/**)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d\\)} incidents returned'\\)\")",
+      "Bash(pkill -f \"python3 main.py\")",
+      "Bash(pkill -f \"python main.py\")",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
+    ]
+  }
+}
