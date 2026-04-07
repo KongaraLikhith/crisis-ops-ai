@@ -11,7 +11,6 @@ from tools.db_tools import log_incident_event, get_incident
 model_name = os.getenv("MODEL", "gemini-3-flash-preview")
 logger = logging.getLogger(__name__)
 
-
 SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
 
 
@@ -51,12 +50,6 @@ def build_incident_timeline(
     triage_report: str,
     comms_summary: str,
 ) -> dict:
-    """
-    Build a lightweight incident timeline from prior workflow outputs.
-
-    Persists INCIDENT_TIMELINE to shared state.
-    Returns the timeline list.
-    """
     timeline = [
         {
             "timestamp_hint": "T+00m",
@@ -86,12 +79,6 @@ def generate_runbook_steps(
     blast_radius: str,
     recommended_action: str,
 ) -> dict:
-    """
-    Generate an operational runbook based on triage severity and scope.
-
-    Persists INCIDENT_RUNBOOK to shared state.
-    Returns the runbook step list.
-    """
     sev = normalize_severity(confirmed_severity)
 
     steps: list[dict] = [
@@ -138,7 +125,7 @@ def generate_runbook_steps(
                 "status": "pending",
             }
         )
-    elif sev == "P2":
+    else:
         steps.append(
             {
                 "order": 4,
@@ -183,12 +170,6 @@ def create_handoff_notes(
     triage_report: str,
     comms_summary: str,
 ) -> dict:
-    """
-    Create concise handoff notes for the next operator or shift.
-
-    Persists HANDOFF_NOTES to shared state.
-    Returns the handoff text.
-    """
     notes = (
         f"Incident {incident_id} ({incident_title}) remains active. "
         f"Latest triage: {triage_report} "
@@ -206,12 +187,6 @@ def save_incident_document(
     tool_context: ToolContext,
     summary: str,
 ) -> dict:
-    """
-    Assemble the final IncidentDocument from state and persist it.
-
-    This must be the last docs tool called. Persists INCIDENT_DOCUMENT.
-    Returns the structured document.
-    """
     document = IncidentDocument(
         incident_id=tool_context.state.get("INCIDENT_ID", "unknown"),
         incident_title=tool_context.state.get("INCIDENT_TITLE", "Unnamed incident"),
@@ -237,7 +212,8 @@ def save_incident_document(
     tool_context.state["INCIDENT_DOCUMENT"] = document.model_dump()
     log_incident_event(
         incident_id=document.incident_id,
-        event_type="incident_document_updated",
+        agent="Docs",
+        action="incident_document_updated",
         detail="Incident document, timeline, and runbook generated.",
     )
 
