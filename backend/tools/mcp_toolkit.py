@@ -11,6 +11,8 @@ from google.oauth2 import service_account
 
 logger = logging.getLogger(__name__)
 
+PARENT_FOLDER_ID = os.getenv("PARENT_FOLDER_ID")
+
 class GoogleMCPToolkit:
     """
     Central toolkit for Google Workspace MCP integrations (Gmail, Calendar, Docs, Sheets).
@@ -102,7 +104,11 @@ class GoogleMCPToolkit:
             return {"status": "ok", "doc_id": f"mock_doc_{int(datetime.now().timestamp())}", "doc_url": "#"}
             
         try:
-            doc = self.docs_service.documents().create(body={'title': title}).execute()
+            body = {'title': title}
+            if PARENT_FOLDER_ID:
+                body['parents'] = [PARENT_FOLDER_ID]
+            
+            doc = self.docs_service.documents().create(body=body).execute()
             doc_id = doc.get('documentId')
             # Mock append initial content
             return {"status": "ok", "doc_id": doc_id, "doc_url": f"https://docs.google.com/document/d/{doc_id}"}
@@ -116,8 +122,8 @@ class GoogleMCPToolkit:
             return {"status": "ok", "doc_id": doc_id}
             
         try:
-            # requests = [{'insertText': {'location': {'index': 1}, 'text': content}}]
-            # self.docs_service.documents().batchUpdate(documentId=doc_id, body={'requests': requests}).execute()
+            requests = [{'insertText': {'location': {'index': 1}, 'text': content}}]
+            self.docs_service.documents().batchUpdate(documentId=doc_id, body={'requests': requests}).execute()
             return {"status": "ok", "doc_id": doc_id}
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -131,7 +137,11 @@ class GoogleMCPToolkit:
             return {"status": "ok", "sheet_id": f"mock_sheet_{int(datetime.now().timestamp())}", "sheet_url": "#"}
             
         try:
-            spreadsheet = self.sheets_service.spreadsheets().create(body={'properties': {'title': title}}).execute()
+            body = {'properties': {'title': title}}
+            if PARENT_FOLDER_ID:
+                body['parents'] = [PARENT_FOLDER_ID]
+                
+            spreadsheet = self.sheets_service.spreadsheets().create(body=body).execute()
             sheet_id = spreadsheet.get('spreadsheetId')
             return {"status": "ok", "sheet_id": sheet_id, "sheet_url": f"https://docs.google.com/spreadsheets/d/{sheet_id}"}
         except Exception as e:
@@ -144,6 +154,13 @@ class GoogleMCPToolkit:
             return {"status": "ok", "sheet_id": sheet_id}
             
         try:
+            body = {'values': [row_data]}
+            self.sheets_service.spreadsheets().values().append(
+                spreadsheetId=sheet_id,
+                range="Sheet1!A1",
+                valueInputOption="RAW",
+                body=body
+            ).execute()
             return {"status": "ok", "sheet_id": sheet_id}
         except Exception as e:
             return {"status": "error", "message": str(e)}

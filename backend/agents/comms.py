@@ -156,9 +156,9 @@ def draft_stakeholder_messages(
 
 def send_internal_updates(
     tool_context: ToolContext,
-    channel: str,
     responder_message: str,
     leadership_message: str,
+    channel: Optional[str] = None,
 ) -> dict:
     """
     Send internal updates to Slack and record the communication event.
@@ -173,12 +173,12 @@ def send_internal_updates(
     log_incident_event(
         incident_id=incident_id,
         event_type="internal_comms_sent",
-        detail=f"Internal updates sent to {channel}",
+        detail=f"Internal updates sent to {channel or 'default channel'}",
     )
 
     tool_context.state["INTERNAL_UPDATES_SENT"] = True
     logger.info("[Comms] send_internal_updates: incident=%s channel=%s", incident_id, channel)
-    return {"status": "sent", "channel": channel}
+    return {"status": "sent", "channel": channel or "default"}
 
 
 def save_comms_summary(
@@ -246,10 +246,8 @@ Call `draft_stakeholder_messages` with:
   - next_update_eta   = from Step 1
 
 ━━━ STEP 3 — Send internal updates ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `send_internal_updates`:
-  - channel            = "#inc-{ INCIDENT_ID }"
-  - responder_message  = responder/slack body from Step 2
-  - leadership_message = leadership/slack body from Step 2
+Call `send_internal_updates` with the responder and leadership messages.
+Do NOT specify a channel; it will automatically use the default channel from the environment.
 
 Do NOT send the customer/status page message with Slack. Draft it only.
 

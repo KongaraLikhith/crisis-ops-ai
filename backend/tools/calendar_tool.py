@@ -28,37 +28,17 @@ def create_war_room(incident_id: str, title: str,
         return f"War room skipped — only created for major incidents (this is {severity})"
 
     # Check if Google Calendar is configured
-    creds_path = os.path.join(os.path.dirname(__file__), "..", "credentials.json")
-    token_path = os.path.join(os.path.dirname(__file__), "..", "token.json")
-
-    if not os.path.exists(creds_path):
-        print("[Calendar] credentials.json not found — skipping war room creation")
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not creds_path or not os.path.exists(creds_path):
+        print("[Calendar] Service account credentials not found — skipping war room creation")
         return _fallback_war_room(incident_id, title)
 
     try:
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
         from googleapiclient.discovery import build
 
         SCOPES = ["https://www.googleapis.com/auth/calendar"]
-        creds  = None
-
-        # Load saved token if it exists
-        if os.path.exists(token_path):
-            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-
-        # Refresh or re-authorize if needed
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
-                creds = flow.run_local_server(port=0)
-            # Save the token for next time
-            with open(token_path, "w") as f:
-                f.write(creds.to_json())
-
+        creds = service_account.Credentials.from_service_account_file(creds_path, scopes=SCOPES)
         service = build("calendar", "v3", credentials=creds)
 
         now       = datetime.utcnow()
