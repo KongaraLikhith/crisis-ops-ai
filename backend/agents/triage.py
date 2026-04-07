@@ -217,7 +217,8 @@ def escalate_to_oncall(
 
     log_incident_event(
         incident_id=incident_id,
-        event_type="oncall_escalation",
+        agent="Triage",
+        action="oncall_escalation",
         detail=f"Team: {team} | Reason: {reason}",
     )
 
@@ -259,7 +260,8 @@ def save_triage_report(
         )
         log_incident_event(
             incident_id=report.incident_id,
-            event_type="triage_completed",
+            agent="Triage",
+            action="triage_completed",
             detail=f"Severity={report.confirmed_severity}, blast_radius={report.blast_radius}",
         )
 
