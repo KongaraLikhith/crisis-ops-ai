@@ -149,15 +149,3 @@ def get_upcoming_events() -> list[dict]:
     Safe fallback when Calendar API is not configured.
     """
     return []
-
-
-if __name__ == "__main__":
-    print("Running one-time Google Calendar authorization...")
-    print("A browser window will open. Sign in with your Google account.")
-    result = create_war_room(
-        incident_id="TEST-001",
-        title="Test War Room — please ignore",
-        severity="P0",
-        duration_minutes=30,
-    )
-    print(f"Result: {result}")

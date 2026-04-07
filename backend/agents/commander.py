@@ -65,10 +65,6 @@ def update_incident_in_state(
     status: str,
     resolution_notes: str = "",
 ) -> dict:
-    """
-    Update the incident status and optional resolution notes in agent state.
-    Call this after the incident is resolved or escalated.
-    """
     tool_context.state["INCIDENT_STATUS"] = status
     if resolution_notes:
         tool_context.state["RESOLUTION_NOTES"] = resolution_notes
@@ -81,10 +77,6 @@ def update_incident_in_state(
 
 
 def get_incident_context(tool_context: ToolContext) -> dict:
-    """
-    Return the current incident context stored in state.
-    Useful for sub-agents that need a summary of the active incident.
-    """
     return {
         "incident_id": tool_context.state.get("INCIDENT_ID"),
         "title": tool_context.state.get("INCIDENT_TITLE"),
@@ -253,7 +245,6 @@ crisis_workflow = SequentialAgent(
 def save_incident_report(
     tool_context: ToolContext, report: str
 ) -> dict:
-    """Store the raw user-submitted incident report in state."""
     tool_context.state["INCIDENT_REPORT"] = report
     logger.info("[Commander] Incident report received and saved to state.")
     return {"status": "success"}
