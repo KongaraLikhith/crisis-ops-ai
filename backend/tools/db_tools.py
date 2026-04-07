@@ -14,13 +14,13 @@ def save_incident(incident_id, title, description):
     )
     db.session.add(inc)
     db.session.commit()
-from datetime import datetime
-from models import db, Incident, IncidentLog, PastIncident
-
 def create_incident(incident_id: str, title: str, description: str):
-    """Alias used by commander intake agent."""
+    """Alias used by commander intake agent. Checks for existence first."""
+    existing = Incident.query.get(incident_id)
+    if existing:
+        return existing.to_dict()
+    
     save_incident(incident_id, title, description)
-    # optionally return the new incident dict
     inc = Incident.query.get(incident_id)
     return inc.to_dict() if inc else {"incident_id": incident_id}
 
@@ -200,21 +200,22 @@ def get_past_incident_from_db(incident_id):
 
 def get_similar_incidents(embedding: list[float], limit: int = 3):
     """
-    Perform semantic search for past incidents using cosine similarity on pgvector.
+    Perform semantic search for past incidents.
+    Falls back to a safe empty list if pgvector is not available (e.g. SQLite).
     """
     if not embedding:
         return []
         
-    from sqlalchemy import text
-    from pgvector.sqlalchemy import Vector
-    
-    # Cosine distance similarity search
-    # <-> is Euclidean, <=> is Cosine distance
-    results = PastIncident.query \
-        .order_by(PastIncident.embedding.cosine_distance(embedding)) \
-        .limit(limit).all()
-        
-    return [r.to_dict() for r in results]
+    try:
+        # Cosine distance similarity search - Requires pgvector
+        results = PastIncident.query \
+            .order_by(PastIncident.embedding.cosine_distance(embedding)) \
+            .limit(limit).all()
+        return [r.to_dict() for r in results]
+    except Exception as e:
+        # Graceful fallback for SQLite or missing extension
+        print(f"[DB] Similarity search skipped (pgvector not available): {e}")
+        return []
 
 
 def get_runbook_by_type(incident_type: str):

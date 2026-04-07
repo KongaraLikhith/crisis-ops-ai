@@ -6,7 +6,8 @@ from google.adk.tools import FunctionTool
 
 # Google API client imports (assumed available in requirements.txt)
 from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
+from google.auth import default
+from google.oauth2 import service_account
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +30,27 @@ class GoogleMCPToolkit:
     def _init_services(self):
         """Lazily initialize Google API services."""
         try:
-            # Note: This requires GOOGLE_APPLICATION_CREDENTIALS or similar to be set
-            self.gmail_service = build('gmail', 'v1', cache_discovery=False)
-            self.calendar_service = build('calendar', 'v3', cache_discovery=False)
-            self.docs_service = build('docs', 'v1', cache_discovery=False)
-            self.sheets_service = build('sheets', 'v4', cache_discovery=False)
-            logger.info("[MCP] Google Workspace services initialized.")
+            # Try to load credentials from file if GOOGLE_APPLICATION_CREDENTIALS is set
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            scopes = [
+                'https://www.googleapis.com/auth/documents',
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/calendar',
+                'https://www.googleapis.com/auth/gmail.send'
+            ]
+            
+            if creds_path and os.path.exists(creds_path):
+                self.creds = service_account.Credentials.from_service_account_file(creds_path, scopes=scopes)
+                logger.info(f"[MCP] Loaded credentials from {creds_path}")
+            else:
+                self.creds, _ = default(scopes=scopes)
+                logger.info("[MCP] Using default application credentials")
+
+            self.gmail_service = build('gmail', 'v1', credentials=self.creds, cache_discovery=False)
+            self.calendar_service = build('calendar', 'v3', credentials=self.creds, cache_discovery=False)
+            self.docs_service = build('docs', 'v1', credentials=self.creds, cache_discovery=False)
+            self.sheets_service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
+            logger.info("[MCP] Google Workspace services initialized successfully.")
         except Exception as e:
             logger.warning(f"[MCP] Failed to init Workspace services: {e}. Falling back to mock/log mode.")
 
