@@ -42,9 +42,9 @@ def update_incident_status(incident_id: str, status: str):
     return {"status": "updated", "incident_id": incident_id, "new_status": status}
 
 
-def log_incident_event(incident_id: str, event_type: str, detail: str):
-    log_action(incident_id, agent=event_type, action=event_type, detail=detail)
-    return {"status": "logged", "incident_id": incident_id, "event_type": event_type}
+def log_incident_event(incident_id: str, agent: str, action: str, detail: str):
+    log_action(incident_id, agent=agent, action=action, detail=detail)
+    return {"status": "logged", "incident_id": incident_id, "event_type": action}
 
 
 def list_open_incidents():
