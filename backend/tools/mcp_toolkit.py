@@ -151,10 +151,10 @@ class GoogleMCPToolkit:
     def get_tools(self) -> List[FunctionTool]:
         """Wrap all methods as ADK FunctionTools."""
         return [
-            FunctionTool.from_callable(self.send_email),
-            FunctionTool.from_callable(self.create_event),
-            FunctionTool.from_callable(self.create_doc),
-            FunctionTool.from_callable(self.append_to_doc),
-            FunctionTool.from_callable(self.create_sheet),
-            FunctionTool.from_callable(self.append_row),
+            FunctionTool(self.send_email),
+            FunctionTool(self.create_event),
+            FunctionTool(self.create_doc),
+            FunctionTool(self.append_to_doc),
+            FunctionTool(self.create_sheet),
+            FunctionTool(self.append_row),
         ]

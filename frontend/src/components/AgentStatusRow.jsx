@@ -18,7 +18,7 @@ export default function AgentStatusRow({ incidentStatus }) {
   // Determine agent state from the incident lifecycle status
   const getState = () => {
     if (!incidentStatus || incidentStatus === 'idle') return 'idle'
-    if (incidentStatus === 'processing') return 'running'
+    if (incidentStatus === 'processing' || incidentStatus === 'in_triage') return 'running'
     // agents_done, assigned, resolved → all agents finished
     return 'done'
   }

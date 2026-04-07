@@ -50,7 +50,7 @@ class Incident(db.Model):
             name="chk_incidents_severity"
         ),
         CheckConstraint(
-            "status IN ('processing', 'agents_done', 'assigned', 'resolved')",
+            "status IN ('processing', 'in_triage', 'agents_done', 'assigned', 'resolved')",
             name="chk_incidents_status"
         ),
         Index("idx_incidents_status", "status"),

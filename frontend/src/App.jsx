@@ -129,7 +129,7 @@ export default function App() {
   useEffect(() => {
     loadSelectedIncident()
     // Poll detail every 3s while agents are running
-    if (selectedIncident?.status === 'processing') {
+    if (selectedIncident?.status === 'processing' || selectedIncident?.status === 'in_triage') {
       const interval = setInterval(loadSelectedIncident, 3000)
       return () => clearInterval(interval)
     }

@@ -49,7 +49,7 @@ export default function AgentFeed({ incidentId, incidentStatus }) {
     loadLogs()
 
     // Poll every 2s while agents are still running
-    const shouldPoll = incidentStatus === 'processing' || incidentStatus === 'agents_done'
+    const shouldPoll = incidentStatus === 'processing' || incidentStatus === 'in_triage' || incidentStatus === 'agents_done'
     if (!shouldPoll) return
 
     const interval = setInterval(loadLogs, 2000)

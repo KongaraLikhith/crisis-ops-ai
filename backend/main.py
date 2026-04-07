@@ -43,7 +43,7 @@ def _get_runner():
     """
     from google.adk.runners import InMemoryRunner
     from agents.commander import root_agent
-    return InMemoryRunner(agent=root_agent)
+    return InMemoryRunner(agent=root_agent, app_name="crisisops")
 
 
 async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
@@ -62,8 +62,8 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     """
     from google.adk.sessions import InMemorySessionService
 
-    session_service = InMemorySessionService()
     runner = _get_runner()
+    session_service = runner.session_service
 
     # Seed the initial state so intake_agent picks it up via { INCIDENT_REPORT }
     report_text = (
@@ -78,7 +78,7 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         state={"INCIDENT_REPORT": report_text},
     )
 
-    from google.adk.types import Content, Part
+    from google.genai.types import Content, Part
     initial_message = Content(
         role="user",
         parts=[Part(text=report_text)],
@@ -89,7 +89,6 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         user_id="system",
         session_id=incident_id,
         new_message=initial_message,
-        session_service=session_service,
     ):
         # Capture the final session state once the run completes
         if hasattr(event, "state"):
@@ -98,7 +97,7 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     # If state wasn't emitted as an event, fetch it directly from the session
     if not final_state:
         stored = await session_service.get_session(
-            app_name="crisisops",
+            app_name=runner.app_name,
             user_id="system",
             session_id=incident_id,
         )
@@ -123,6 +122,7 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
 # ── Background thread entry point ───────────────────────
 def run_agents_background(incident_id: str, title: str, description: str):
     """Runs inside a daemon thread — creates its own event loop and app context."""
+    logger.info("[Background] Starting agent pipeline for %s", incident_id)
     try:
         with app.app_context():
             results = asyncio.run(_run_pipeline(incident_id, title, description))
@@ -263,4 +263,4 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8000)
+    app.run(debug=False, port=8000)
