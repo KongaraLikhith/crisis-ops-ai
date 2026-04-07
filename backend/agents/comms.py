@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 from google.adk import Agent
@@ -12,7 +12,7 @@ from tools.mcp_toolkit import GoogleMCPToolkit
 
 mcp = GoogleMCPToolkit()
 
-model_name = os.getenv("MODEL", "gemini-2.0-flash")
+model_name = os.getenv("MODEL", "gemini-3-flash-preview")
 logger = logging.getLogger(__name__)
 
 
@@ -36,26 +36,34 @@ class CommsSummary(BaseModel):
     summary: str
 
 
+SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
+
+
+def _normalize_severity(value: str) -> str:
+    sev = (value or "").strip().upper()
+    return sev if sev in SEVERITY_ORDER else "P2"
+
+
 def classify_incident_status(
     tool_context: ToolContext,
     confirmed_severity: str,
     blast_radius: str,
     recommended_action: str,
 ) -> dict:
-    """
-    Classify the incident into communication statuses for internal and customer-facing updates.
+    sev = _normalize_severity(confirmed_severity)
 
-    Persists INTERNAL_COMMS_STATUS, CUSTOMER_COMMS_STATUS, and NEXT_UPDATE_ETA.
-    Returns a dict with those three values.
-    """
-    if confirmed_severity == "P1":
+    if sev == "P0":
+        internal_status = "critical_incident"
+        customer_status = "service_outage"
+        next_update_eta = "15 minutes"
+    elif sev == "P1":
         internal_status = "major_incident"
         customer_status = "service_disruption"
-        next_update_eta = "15 minutes"
-    elif confirmed_severity == "P2":
+        next_update_eta = "30 minutes"
+    elif sev == "P2":
         internal_status = "high_priority_incident"
         customer_status = "degraded_service"
-        next_update_eta = "30 minutes"
+        next_update_eta = "60 minutes"
     elif blast_radius == "regional":
         internal_status = "investigating"
         customer_status = "partial_impact"
@@ -72,10 +80,11 @@ def classify_incident_status(
     tool_context.state["INTERNAL_COMMS_STATUS"] = internal_status
     tool_context.state["CUSTOMER_COMMS_STATUS"] = customer_status
     tool_context.state["NEXT_UPDATE_ETA"] = next_update_eta
+    tool_context.state["CONFIRMED_SEVERITY"] = sev
 
     logger.info(
-        "[Comms] classify_incident_status: internal=%s customer=%s eta=%s",
-        internal_status, customer_status, next_update_eta,
+        "[Comms] classify_incident_status: severity=%s internal=%s customer=%s eta=%s",
+        sev, internal_status, customer_status, next_update_eta,
     )
     return {
         "internal_status": internal_status,
@@ -93,14 +102,8 @@ def draft_stakeholder_messages(
     customer_status: str,
     next_update_eta: str,
 ) -> dict:
-    """
-    Draft communication payloads for leadership, responders, and optionally customers.
-
-    Persists DRAFT_MESSAGES and STAKEHOLDERS_CONTACTED to state.
-    Returns the structured message list.
-    """
     title = incident_title.strip() or "Unnamed incident"
-    sev = confirmed_severity
+    sev = _normalize_severity(confirmed_severity)
 
     internal_body = (
         f"Incident {incident_id} ({sev}) is currently {internal_status.replace('_', ' ')}. "
@@ -108,8 +111,18 @@ def draft_stakeholder_messages(
     )
     responder_body = (
         f"Active incident {incident_id}: {title}. Severity {sev}. "
-        f"Current status: {internal_status.replace('_', ' ')}. Use incident channel and bridge for updates."
+        f"Current status: {internal_status.replace('_', ' ')}. Use the incident channel and bridge for updates."
     )
+
+    if sev == "P0":
+        responder_priority = "critical"
+        leadership_priority = "critical"
+    elif sev == "P1":
+        responder_priority = "high"
+        leadership_priority = "high"
+    else:
+        responder_priority = "medium"
+        leadership_priority = "medium"
 
     messages: list[dict] = [
         {
@@ -117,14 +130,14 @@ def draft_stakeholder_messages(
             "channel": "slack",
             "subject": f"[{incident_id}] Responder update",
             "body": responder_body,
-            "priority": "urgent" if sev in ("P1", "P2") else "high",
+            "priority": responder_priority,
         },
         {
             "audience": "leadership",
             "channel": "slack",
             "subject": f"[{incident_id}] Leadership update",
             "body": internal_body,
-            "priority": "urgent" if sev == "P1" else "high",
+            "priority": leadership_priority,
         },
     ]
 
@@ -142,7 +155,7 @@ def draft_stakeholder_messages(
                 "channel": "status_page",
                 "subject": f"Service update: {title}",
                 "body": customer_body,
-                "priority": "high",
+                "priority": "high" if sev in ("P0", "P1") else "medium",
             }
         )
         stakeholders.append("customers")
@@ -160,12 +173,6 @@ def send_internal_updates(
     leadership_message: str,
     channel: Optional[str] = None,
 ) -> dict:
-    """
-    Send internal updates to Slack and record the communication event.
-
-    Persists INTERNAL_UPDATES_SENT=True.
-    Returns send status.
-    """
     incident_id = tool_context.state.get("INCIDENT_ID", "unknown")
 
     send_slack_message(channel=channel, message=responder_message)
@@ -185,17 +192,11 @@ def save_comms_summary(
     tool_context: ToolContext,
     summary: str,
 ) -> dict:
-    """
-    Assemble the final CommsSummary from state and persist it.
-
-    This must be the last comms tool called. The saved COMMS_SUMMARY key is
-    consumed by the resolution agent.
-    """
     report = CommsSummary(
         incident_id=tool_context.state.get("INCIDENT_ID", "unknown"),
         incident_title=tool_context.state.get("INCIDENT_TITLE", "Unnamed incident"),
-        confirmed_severity=tool_context.state.get(
-            "CONFIRMED_SEVERITY", tool_context.state.get("INCIDENT_SEVERITY", "P3")
+        confirmed_severity=_normalize_severity(
+            tool_context.state.get("CONFIRMED_SEVERITY", tool_context.state.get("INCIDENT_SEVERITY", "P2"))
         ),
         internal_status=tool_context.state.get("INTERNAL_COMMS_STATUS", "investigating"),
         customer_status=tool_context.state.get("CUSTOMER_COMMS_STATUS", "investigating"),
@@ -230,6 +231,11 @@ You are the CrisisOps Communications Agent.
 
 Your job is to turn the triage findings into clear, fast, appropriate communications.
 
+SEVERITY SCALE:
+- P0: most severe, immediate escalation
+- P1: high severity
+- P2: least severe among these priorities
+
 ━━━ STEP 1 — Classify the communication status ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `classify_incident_status` using triage data:
   - confirmed_severity = value from { triage_report }
@@ -238,12 +244,12 @@ Call `classify_incident_status` using triage data:
 
 ━━━ STEP 2 — Draft stakeholder messages ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `draft_stakeholder_messages` with:
-  - incident_id       = { INCIDENT_ID }
-  - incident_title    = { INCIDENT_TITLE }
+  - incident_id        = { INCIDENT_ID }
+  - incident_title     = { INCIDENT_TITLE }
   - confirmed_severity = value from { triage_report }
-  - internal_status   = from Step 1
-  - customer_status   = from Step 1
-  - next_update_eta   = from Step 1
+  - internal_status    = from Step 1
+  - customer_status    = from Step 1
+  - next_update_eta    = from Step 1
 
 ━━━ STEP 3 — Send internal updates ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `send_internal_updates` with the responder and leadership messages.

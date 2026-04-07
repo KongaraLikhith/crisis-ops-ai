@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 from google.adk import Agent
@@ -11,8 +11,15 @@ from tools.mcp_toolkit import GoogleMCPToolkit
 
 mcp = GoogleMCPToolkit()
 
-model_name = os.getenv("MODEL", "gemini-2.0-flash")
+model_name = os.getenv("MODEL", "gemini-3-flash-preview")
 logger = logging.getLogger(__name__)
+
+SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
+
+
+def normalize_severity(value: str) -> str:
+    sev = (value or "").strip().upper()
+    return sev if sev in SEVERITY_ORDER else "P2"
 
 
 class RunbookStep(BaseModel):
@@ -46,12 +53,6 @@ def build_incident_timeline(
     triage_report: str,
     comms_summary: str,
 ) -> dict:
-    """
-    Build a lightweight incident timeline from prior workflow outputs.
-
-    Persists INCIDENT_TIMELINE to shared state.
-    Returns the timeline list.
-    """
     timeline = [
         {
             "timestamp_hint": "T+00m",
@@ -81,12 +82,8 @@ def generate_runbook_steps(
     blast_radius: str,
     recommended_action: str,
 ) -> dict:
-    """
-    Generate an operational runbook based on triage severity and scope.
+    sev = normalize_severity(confirmed_severity)
 
-    Persists INCIDENT_RUNBOOK to shared state.
-    Returns the runbook step list.
-    """
     steps: list[dict] = [
         {
             "order": 1,
@@ -111,13 +108,33 @@ def generate_runbook_steps(
         },
     ]
 
-    if confirmed_severity == "P1":
+    if sev == "P0":
         steps.append(
             {
                 "order": 4,
-                "title": "Executive escalation",
+                "title": "Immediate executive escalation",
                 "owner": "incident_commander",
-                "action": "Brief executive stakeholders and confirm the next leadership checkpoint.",
+                "action": "Brief executive stakeholders, confirm command ownership, and track the next leadership checkpoint.",
+                "status": "pending",
+            }
+        )
+    elif sev == "P1":
+        steps.append(
+            {
+                "order": 4,
+                "title": "Urgent leadership escalation",
+                "owner": "incident_commander",
+                "action": "Brief leadership and confirm the next checkpoint for active mitigation.",
+                "status": "pending",
+            }
+        )
+    else:
+        steps.append(
+            {
+                "order": 4,
+                "title": "Standard follow-up",
+                "owner": "incident_commander",
+                "action": "Track mitigation progress and confirm the next update window.",
                 "status": "pending",
             }
         )
@@ -156,12 +173,6 @@ def create_handoff_notes(
     triage_report: str,
     comms_summary: str,
 ) -> dict:
-    """
-    Create concise handoff notes for the next operator or shift.
-
-    Persists HANDOFF_NOTES to shared state.
-    Returns the handoff text.
-    """
     notes = (
         f"Incident {incident_id} ({incident_title}) remains active. "
         f"Latest triage: {triage_report} "
@@ -179,17 +190,14 @@ def save_incident_document(
     tool_context: ToolContext,
     summary: str,
 ) -> dict:
-    """
-    Assemble the final IncidentDocument from state and persist it.
-
-    This must be the last docs tool called. Persists INCIDENT_DOCUMENT.
-    Returns the structured document.
-    """
     document = IncidentDocument(
         incident_id=tool_context.state.get("INCIDENT_ID", "unknown"),
         incident_title=tool_context.state.get("INCIDENT_TITLE", "Unnamed incident"),
-        severity=tool_context.state.get(
-            "CONFIRMED_SEVERITY", tool_context.state.get("INCIDENT_SEVERITY", "P3")
+        severity=normalize_severity(
+            tool_context.state.get(
+                "CONFIRMED_SEVERITY",
+                tool_context.state.get("INCIDENT_SEVERITY", "P2"),
+            )
         ),
         status=tool_context.state.get("INCIDENT_STATUS", "open"),
         timeline=[
@@ -207,7 +215,8 @@ def save_incident_document(
     tool_context.state["INCIDENT_DOCUMENT"] = document.model_dump()
     log_incident_event(
         incident_id=document.incident_id,
-        event_type="incident_document_updated",
+        agent="Docs",
+        action="incident_document_updated",
         detail="Incident document, timeline, and runbook generated.",
     )
 
@@ -229,6 +238,11 @@ docs_agent = Agent(
 You are the CrisisOps Documentation Agent.
 
 Your role is to produce a clean operational record of the incident so the response can continue smoothly.
+
+SEVERITY SCALE:
+- P0: most severe, immediate escalation
+- P1: high severity
+- P2: least severe among these priorities
 
 ━━━ STEP 1 — Build the timeline ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `build_incident_timeline` with:

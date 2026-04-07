@@ -1,50 +1,65 @@
 import os
+
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from sqlalchemy import case, or_
+
 from models import db, PastIncident
-from sqlalchemy import or_, case
-from dotenv import load_dotenv
 
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+API_KEY = os.getenv("GOOGLE_API_KEY")
+MODEL = "gemini-embedding-001"
+OUTPUT_DIMENSIONALITY = 768
+SIMILARITY_THRESHOLD = 0.65
+
+client = genai.Client(api_key=API_KEY) if API_KEY else None
 
 
-# ── EMBEDDING ────────────────────────────────────────────
-def get_embedding(text_to_embed):
+def get_embedding(text_to_embed: str) -> list[float]:
     """
-    Generate 768-dim embedding using Gemini embedding model.
+    Generate a 768-dim query embedding using Gemini embeddings.
     """
+    if not text_to_embed or not text_to_embed.strip():
+        return []
+
+    if client is None:
+        raise RuntimeError("GOOGLE_API_KEY not configured")
+
     try:
         response = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=[text_to_embed],
-            config=types.EmbedContentConfig(output_dimensionality=768)
+            model=MODEL,
+            contents=text_to_embed,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_QUERY",
+                output_dimensionality=OUTPUT_DIMENSIONALITY,
+            ),
         )
+        if not response.embeddings:
+            return []
         return response.embeddings[0].values
     except Exception as e:
         print(f"[ERROR] Embedding failed: {str(e)}")
         raise
 
 
-# ── MAIN SEARCH ──────────────────────────────────────────
 def search_similar_incidents(query_text, limit=3, return_mode="text"):
     """
     Search similar incidents using:
-    1) Vector search (preferred)
+    1) Vector search
     2) Keyword fallback
     """
-
     try:
         print(f"[DEBUG] Searching for: {query_text}")
 
         query_vector = get_embedding(query_text)
-        results = _vector_search(query_vector, limit=limit)
+        if query_vector:
+            results = _vector_search(query_vector, limit=limit)
+            print(f"[DEBUG] Vector results: {len(results)}")
 
-        print(f"[DEBUG] Vector results: {len(results)}")
-
-        if results:
-            return _format_results(results, mode="vector", return_mode=return_mode)
+            if results:
+                return _format_results(results, mode="vector", return_mode=return_mode)
 
     except Exception as e:
         print(f"[WARN] Vector search failed, using keyword fallback: {str(e)}")
@@ -60,30 +75,28 @@ def search_similar_incidents(query_text, limit=3, return_mode="text"):
     return "No similar past incidents found in history."
 
 
-# ── VECTOR SEARCH ────────────────────────────────────────
 def _vector_search(query_vector, limit=3):
     """
     Semantic search using pgvector cosine similarity.
     """
-
-    similarity_expr = (1 - PastIncident.embedding.cosine_distance(query_vector))
+    similarity_expr = 1 - PastIncident.embedding.cosine_distance(query_vector)
 
     rows = (
         db.session.query(
             PastIncident,
-            similarity_expr.label("similarity")
+            similarity_expr.label("similarity"),
         )
         .filter(
             PastIncident.embedding.isnot(None),
-            similarity_expr > 0.65  # threshold to remove weak matches
+            similarity_expr > SIMILARITY_THRESHOLD,
         )
         .order_by(
-            similarity_expr.desc(),  # relevance first
+            similarity_expr.desc(),
             case(
                 (PastIncident.resolution_confidence == "human_verified", 0),
-                else_=1
+                else_=1,
             ),
-            PastIncident.created_at.desc()
+            PastIncident.created_at.desc(),
         )
         .limit(limit)
         .all()
@@ -92,13 +105,12 @@ def _vector_search(query_vector, limit=3):
     return rows
 
 
-# ── KEYWORD FALLBACK ─────────────────────────────────────
 def _keyword_search(query_text, limit=3):
     stop_words = {
-        'the', 'a', 'an', 'is', 'are', 'was', 'and', 'or',
-        'for', 'in', 'on', 'at', 'to', 'all', 'not', 'no',
-        'with', 'from', 'that', 'this', 'into', 'after',
-        'before', 'during', 'while', 'users', 'unable'
+        "the", "a", "an", "is", "are", "was", "and", "or",
+        "for", "in", "on", "at", "to", "all", "not", "no",
+        "with", "from", "that", "this", "into", "after",
+        "before", "during", "while", "users", "unable",
     }
 
     words = [
@@ -117,6 +129,7 @@ def _keyword_search(query_text, limit=3):
             PastIncident.title.ilike(like),
             PastIncident.description.ilike(like),
             PastIncident.category.ilike(like),
+            PastIncident.severity.ilike(like),
             PastIncident.human_root_cause.ilike(like),
             PastIncident.agent_root_cause.ilike(like),
             PastIncident.human_resolution.ilike(like),
@@ -129,9 +142,9 @@ def _keyword_search(query_text, limit=3):
         .order_by(
             case(
                 (PastIncident.resolution_confidence == "human_verified", 0),
-                else_=1
+                else_=1,
             ),
-            PastIncident.created_at.desc()
+            PastIncident.created_at.desc(),
         )
         .limit(limit)
         .all()
@@ -140,7 +153,6 @@ def _keyword_search(query_text, limit=3):
     return rows
 
 
-# ── FORMAT RESULTS ───────────────────────────────────────
 def _format_results(rows, mode="vector", return_mode="text"):
     formatted = []
 
@@ -186,7 +198,7 @@ def _format_results(rows, mode="vector", return_mode="text"):
         output += f"   Confidence: {item['confidence']}\n"
         if mode == "vector" and item["similarity_score"] is not None:
             output += f"   Similarity Score: {item['similarity_score']}\n"
-        elif mode == "keyword":
-            output += f"   Similarity Score: fallback\n"
+        else:
+            output += "   Similarity Score: fallback\n"
 
     return output.strip()
