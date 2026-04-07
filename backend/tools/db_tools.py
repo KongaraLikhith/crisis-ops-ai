@@ -195,3 +195,49 @@ def get_past_incident_from_db(incident_id):
         .order_by(PastIncident.created_at.desc()).all()
     return [r.to_dict() for r in rows]
 
+
+# ── DEV 3 MCP TOOLS ──────────────────────────────────────
+
+def get_similar_incidents(embedding: list[float], limit: int = 3):
+    """
+    Perform semantic search for past incidents using cosine similarity on pgvector.
+    """
+    if not embedding:
+        return []
+        
+    from sqlalchemy import text
+    from pgvector.sqlalchemy import Vector
+    
+    # Cosine distance similarity search
+    # <-> is Euclidean, <=> is Cosine distance
+    results = PastIncident.query \
+        .order_by(PastIncident.embedding.cosine_distance(embedding)) \
+        .limit(limit).all()
+        
+    return [r.to_dict() for r in results]
+
+
+def get_runbook_by_type(incident_type: str):
+    """
+    Fetch the remediation runbook for a specific incident category.
+    """
+    from models import Runbook
+    rb = Runbook.query.filter_by(incident_type=incident_type).first()
+    return rb.to_dict() if rb else None
+
+
+def get_contacts_by_team(team: str):
+    """
+    Fetch stakeholder contact info for a specific team.
+    """
+    from models import Contact
+    contacts = Contact.query.filter_by(team=team).all()
+    return [c.to_dict() for c in contacts]
+
+
+def log_timeline_event(incident_id: str, actor: str, action: str, detail: str):
+    """
+    Record an agent action in the timeline (alias for log_action).
+    """
+    return log_action(incident_id, agent=actor, action=action, detail=detail)
+

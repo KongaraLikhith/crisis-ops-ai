@@ -7,6 +7,9 @@ from google.adk import Agent
 from google.adk.tools.tool_context import ToolContext
 
 from tools.db_tools import log_incident_event, get_incident
+from tools.mcp_toolkit import GoogleMCPToolkit
+
+mcp = GoogleMCPToolkit()
 
 model_name = os.getenv("MODEL", "gemini-2.0-flash")
 logger = logging.getLogger(__name__)
@@ -252,6 +255,11 @@ Call `save_incident_document` with a concise summary covering:
   - whether communications are active
   - what the next operator should do
 
+━━━ STEP 5 — Create Workspace Resources ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Call `create_doc` with title "Incident Report: { INCIDENT_ID }".
+2. Call `create_sheet` with title "Incident Timeline: { INCIDENT_ID }" and headers ["Timestamp", "Actor", "Action", "Detail"].
+3. Log the generated Doc URL and Sheet URL in your final report.
+
 ━━━ STEP 5 — Present findings ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Output the report in this exact format:
 
@@ -282,6 +290,7 @@ COMMS_SUMMARY: { comms_summary }
         save_incident_document,
         log_incident_event,
         get_incident,
+        *mcp.get_tools(),
     ],
     output_key="incident_document",
 )

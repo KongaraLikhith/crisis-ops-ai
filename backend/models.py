@@ -198,3 +198,49 @@ class PastIncident(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# =========================
+# 4) RUNBOOKS
+# =========================
+class Runbook(db.Model):
+    __tablename__ = "runbooks"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    title = db.Column(db.Text, nullable=False)
+    incident_type = db.Column(db.Text, nullable=False)  # e.g., 'database', 'auth'
+    steps_json = db.Column(db.JSON, nullable=False)    # List of steps
+    tags = db.Column(db.Text)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "incident_type": self.incident_type,
+            "steps": self.steps_json,
+            "tags": self.tags,
+        }
+
+
+# =========================
+# 5) CONTACTS
+# =========================
+class Contact(db.Model):
+    __tablename__ = "contacts"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.Text, nullable=False)
+    team = db.Column(db.Text, nullable=False)  # e.g., 'platform', 'security'
+    role = db.Column(db.Text)
+    gmail_address = db.Column(db.Text)
+    calendar_id = db.Column(db.Text)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "team": self.team,
+            "role": self.role,
+            "gmail_address": self.gmail_address,
+            "calendar_id": self.calendar_id,
+        }

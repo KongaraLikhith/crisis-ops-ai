@@ -7,7 +7,10 @@ from google.adk import Agent
 from google.adk.tools.tool_context import ToolContext
 
 from tools.slack_tool import send_slack_message
-from tools.db_tools import log_incident_event
+from tools.db_tools import log_incident_event, get_contacts_by_team
+from tools.mcp_toolkit import GoogleMCPToolkit
+
+mcp = GoogleMCPToolkit()
 
 model_name = os.getenv("MODEL", "gemini-2.0-flash")
 logger = logging.getLogger(__name__)
@@ -250,6 +253,11 @@ Call `send_internal_updates`:
 
 Do NOT send the customer/status page message with Slack. Draft it only.
 
+━━━ STEP 4 — Send Email Alerts (P0/P1 only) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Call `get_contacts_by_team` for the impacted teams.
+2. For each contact, call `send_email` with a concise incident brief if severity is P0 or P1.
+3. Include "Email alerts sent" in your summary if successful.
+
 ━━━ STEP 4 — Save the communications summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `save_comms_summary` with a concise summary covering:
   - internal comms status
@@ -284,6 +292,8 @@ TRIAGE_REPORT: { triage_report }
         save_comms_summary,
         send_slack_message,
         log_incident_event,
+        get_contacts_by_team,
+        *mcp.get_tools(),
     ],
     output_key="comms_summary",
 )
