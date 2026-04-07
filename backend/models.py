@@ -59,7 +59,7 @@ class Incident(db.Model):
         return f"<Incident {self.id} - {self.title}>"
 
     def to_dict(self):
-        return {
+        d = {
             "id": self.id,
             "title": self.title,
             "description": self.description,
@@ -72,6 +72,13 @@ class Incident(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+        # Include agent analysis if it exists in the linked PastIncident record
+        if self.past_incident:
+            d["agent_root_cause"] = self.past_incident.agent_root_cause
+            d["agent_resolution"] = self.past_incident.agent_resolution
+            d["agent_comms"] = self.past_incident.agent_comms
+            d["agent_postmortem"] = self.past_incident.agent_postmortem
+        return d
 
 
 # =========================

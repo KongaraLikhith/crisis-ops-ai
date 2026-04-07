@@ -129,7 +129,9 @@ export default function App() {
   useEffect(() => {
     loadSelectedIncident()
     // Poll detail every 3s while agents are running
-    if (selectedIncident?.status === 'processing' || selectedIncident?.status === 'in_triage') {
+    // Poll detail every 3s while agents are running or in transition
+    const runningStatuses = ['processing', 'in_triage']
+    if (selectedIncident && runningStatuses.includes(selectedIncident.status)) {
       const interval = setInterval(loadSelectedIncident, 3000)
       return () => clearInterval(interval)
     }
@@ -226,7 +228,7 @@ export default function App() {
                   onAssigned={handleRefresh}
                 />
               )}
-              {selectedIncident.status === 'assigned' && (
+              {['assigned', 'in_progress', 'escalated'].includes(selectedIncident.status) && (
                 <ResolvePanel
                   incident={selectedIncident}
                   onResolved={handleRefresh}
