@@ -47,16 +47,6 @@ def classify_incident_status(
     blast_radius: str,
     recommended_action: str,
 ) -> dict:
-    """
-    Classify the incident into communication statuses for internal and customer-facing updates.
-
-    Severity rules:
-      - P0: most severe, immediate escalation
-      - P1: high severity
-      - P2: least severe among these priorities
-    Persists INTERNAL_COMMS_STATUS, CUSTOMER_COMMS_STATUS, and NEXT_UPDATE_ETA.
-    Returns a dict with those three values.
-    """
     sev = _normalize_severity(confirmed_severity)
 
     if sev == "P0":
@@ -109,12 +99,6 @@ def draft_stakeholder_messages(
     customer_status: str,
     next_update_eta: str,
 ) -> dict:
-    """
-    Draft communication payloads for leadership, responders, and optionally customers.
-
-    Persists DRAFT_MESSAGES and STAKEHOLDERS_CONTACTED to state.
-    Returns the structured message list.
-    """
     title = incident_title.strip() or "Unnamed incident"
     sev = _normalize_severity(confirmed_severity)
 
@@ -186,19 +170,14 @@ def send_internal_updates(
     responder_message: str,
     leadership_message: str,
 ) -> dict:
-    """
-    Send internal updates to Slack and record the communication event.
-
-    Persists INTERNAL_UPDATES_SENT=True.
-    Returns send status.
-    """
     incident_id = tool_context.state.get("INCIDENT_ID", "unknown")
 
     send_slack_message(channel=channel, message=responder_message)
     send_slack_message(channel=channel, message=leadership_message)
     log_incident_event(
         incident_id=incident_id,
-        event_type="internal_comms_sent",
+        agent="Comms",
+        action="internal_comms_sent",
         detail=f"Internal updates sent to {channel}",
     )
 
@@ -211,12 +190,6 @@ def save_comms_summary(
     tool_context: ToolContext,
     summary: str,
 ) -> dict:
-    """
-    Assemble the final CommsSummary from state and persist it.
-
-    This must be the last comms tool called. The saved COMMS_SUMMARY key is
-    consumed by the resolution agent.
-    """
     report = CommsSummary(
         incident_id=tool_context.state.get("INCIDENT_ID", "unknown"),
         incident_title=tool_context.state.get("INCIDENT_TITLE", "Unnamed incident"),
