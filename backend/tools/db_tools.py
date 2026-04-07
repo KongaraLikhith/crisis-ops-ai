@@ -1,6 +1,7 @@
 from datetime import datetime
 from models import db, Incident, IncidentLog, PastIncident
 from tools.embedding_tool import embed_resolved_incident
+from sqlalchemy.orm import joinedload
 
 # ── CREATE ───────────────────────────────────────────────
 def save_incident(incident_id, title, description):
@@ -39,9 +40,11 @@ def log_incident_event(incident_id: str, event_type: str, detail: str):
     return {"status": "logged", "incident_id": incident_id, "event_type": event_type}
 
 def list_open_incidents():
-    incs = Incident.query.filter(Incident.status != "resolved") \
-                         .order_by(Incident.created_at.desc()) \
-                         .limit(50).all()
+    incs = Incident.query \
+        .options(joinedload(Incident.past_incident)) \
+        .filter(Incident.status != "resolved") \
+        .order_by(Incident.created_at.desc()) \
+        .limit(50).all()
     return [i.to_dict() for i in incs]
 
 # ── LOG (every agent calls this) ─────────────────────────
@@ -168,7 +171,7 @@ def _graduate_to_history(inc, agent_was_correct,
 
 # ── READ ─────────────────────────────────────────────────
 def get_incident(incident_id):
-    inc = Incident.query.get(incident_id)
+    inc = Incident.query.options(joinedload(Incident.past_incident)).get(incident_id)
     return inc.to_dict() if inc else None
 
 def get_logs(incident_id):
@@ -180,6 +183,7 @@ def get_logs(incident_id):
 
 def list_incidents():
     incs = Incident.query \
+        .options(joinedload(Incident.past_incident)) \
         .order_by(Incident.created_at.desc()) \
         .limit(30).all()
     return [i.to_dict() for i in incs]

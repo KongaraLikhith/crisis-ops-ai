@@ -45,10 +45,7 @@ class Incident(db.Model):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "severity IN ('P0', 'P1', 'P2') OR severity IS NULL",
-            name="chk_incidents_severity"
-        ),
+
         Index("idx_incidents_status", "status"),
         Index("idx_incidents_severity", "severity"),
         Index("idx_incidents_created_at", db.text("created_at DESC")),
@@ -74,10 +71,6 @@ class Incident(db.Model):
         }
         # Include agent analysis if it exists in the linked PastIncident record
         past = self.past_incident
-        if not past:
-            # Manual fallback if relationship isn't loaded/linked properly in this session
-            from models import PastIncident
-            past = PastIncident.query.filter_by(incident_id=self.id).first()
 
         if past:
             d["agent_root_cause"] = past.agent_root_cause
