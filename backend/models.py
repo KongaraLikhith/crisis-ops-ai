@@ -73,11 +73,17 @@ class Incident(db.Model):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
         # Include agent analysis if it exists in the linked PastIncident record
-        if self.past_incident:
-            d["agent_root_cause"] = self.past_incident.agent_root_cause
-            d["agent_resolution"] = self.past_incident.agent_resolution
-            d["agent_comms"] = self.past_incident.agent_comms
-            d["agent_postmortem"] = self.past_incident.agent_postmortem
+        past = self.past_incident
+        if not past:
+            # Manual fallback if relationship isn't loaded/linked properly in this session
+            from models import PastIncident
+            past = PastIncident.query.filter_by(incident_id=self.id).first()
+
+        if past:
+            d["agent_root_cause"] = past.agent_root_cause
+            d["agent_resolution"] = past.agent_resolution
+            d["agent_comms"] = past.agent_comms
+            d["agent_postmortem"] = past.agent_postmortem
         return d
 
 
