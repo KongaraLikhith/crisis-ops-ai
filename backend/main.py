@@ -26,12 +26,15 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+APP_NAME = "crisisops"
+VALID_SEVERITIES = {"P0", "P1", "P2"}
+DEFAULT_SEVERITY = "P2"
+
 # ── App setup ────────────────────────────────────────────
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Allow local frontend + Cloud Shell previews
 CORS(
     app,
     resources={
@@ -39,7 +42,6 @@ CORS(
             "origins": [
                 "http://localhost:5173",
                 "http://localhost:3000",
-                # add your dev URL here if needed
             ]
         }
     },
@@ -51,11 +53,14 @@ with app.app_context():
     db.create_all()
 
 
-# ── ADK runner helper ────────────────────────────────────
+def normalize_severity(value: str | None) -> str:
+    sev = (value or "").strip().upper()
+    return sev if sev in VALID_SEVERITIES else DEFAULT_SEVERITY
+
+
 def _get_runner():
     """
-    Lazily imports and builds the ADK InMemoryRunner so the import
-    only happens after the app context is fully initialised.
+    Lazily import and build the ADK InMemoryRunner after app setup.
     """
     from google.adk.runners import InMemoryRunner
     from agents.commander import root_agent
@@ -65,17 +70,8 @@ def _get_runner():
 
 async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     """
-    Execute the full crisis_workflow via the ADK runner and extract the
+    Execute the full crisis workflow via the ADK runner and extract the
     structured outputs written to session state by each sub-agent.
-
-    Returns a dict shaped like:
-    {
-      "triage_root_cause": str,
-      "triage_resolution": str,
-      "comms":             str,
-      "docs":              str,
-      "category":          str | None,
-    }
     """
     from google.adk.sessions import InMemorySessionService
     import google.genai.types as types
@@ -83,7 +79,6 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     session_service = InMemorySessionService()
     runner = _get_runner()
 
-    # Seed initial state so intake_agent picks it up via { INCIDENT_REPORT }
     report_text = (
         f"Title: {title}\n"
         f"Incident ID: {incident_id}\n"
@@ -91,7 +86,7 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     )
 
     await session_service.create_session(
-        app_name="crisisops",
+        app_name=APP_NAME,
         user_id="system",
         session_id=incident_id,
         state={"INCIDENT_REPORT": report_text},
@@ -102,7 +97,6 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         parts=[types.Part(text=report_text)],
     )
 
-    # Run the workflow, then fetch final state from the session
     async for _ in runner.run_async(
         user_id="system",
         session_id=incident_id,
@@ -112,7 +106,7 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         pass
 
     stored = await session_service.get_session(
-        app_name="crisisops",
+        app_name=APP_NAME,
         user_id="system",
         session_id=incident_id,
     )
@@ -128,46 +122,52 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     comms: dict = final_state.get("COMMS_SUMMARY") or {}
     docs: dict = final_state.get("INCIDENT_DOCUMENT") or {}
 
+    category = normalize_severity(
+        triage.get("confirmed_severity") or final_state.get("CONFIRMED_SEVERITY")
+    )
+
     return {
-        "triage_root_cause": triage.get(
-            "summary", final_state.get("triage_report", "")
-        ),
+        "triage_root_cause": triage.get("summary") or final_state.get("triage_report", ""),
         "triage_resolution": triage.get("recommended_action", ""),
-        "comms": comms.get("summary", final_state.get("comms_summary", "")),
-        "docs": docs.get("summary", final_state.get("incident_document", "")),
-        "category": triage.get("confirmed_severity"),
+        "comms": comms.get("summary") or final_state.get("comms_summary", ""),
+        "docs": docs.get("summary") or final_state.get("incident_document", ""),
+        "category": category,
     }
 
 
-# ── Background thread entry point ───────────────────────
 def run_agents_background(incident_id: str, title: str, description: str):
-    """Runs inside a daemon thread — creates its own event loop and app context."""
+    """
+    Background thread entry point. Creates its own event loop and app context.
+    """
     try:
         with app.app_context():
             results = asyncio.run(_run_pipeline(incident_id, title, description))
+            category = normalize_severity(results.get("category"))
+
             agents_done(
                 incident_id,
-                results.get("category", "P3"),
-                results["triage_root_cause"],
-                results["triage_resolution"],
-                results["comms"],
-                results["docs"],
-                results.get("category"),
+                category,
+                results.get("triage_root_cause", ""),
+                results.get("triage_resolution", ""),
+                results.get("comms", ""),
+                results.get("docs", ""),
+                category,
             )
     except Exception as e:
         logger.error(
-            "[ERROR] Background agent run failed for %s: %s", incident_id, str(e)
+            "[ERROR] Background agent run failed for %s: %s",
+            incident_id,
+            str(e),
         )
         traceback.print_exc()
 
 
-# ── API: TRIGGER ────────────────────────────────────────
 @app.route("/api/incident/trigger", methods=["POST"])
 def trigger_incident():
     try:
         data = request.get_json() or {}
-        title = data.get("title", "").strip()
-        description = data.get("description", "").strip()
+        title = (data.get("title") or "").strip()
+        description = (data.get("description") or "").strip()
 
         if not title:
             return jsonify({"error": "title required"}), 400
@@ -191,20 +191,14 @@ def trigger_incident():
     except Exception as e:
         logger.error("[ERROR] /api/incident/trigger failed: %s", str(e))
         traceback.print_exc()
-        return (
-            jsonify(
-                {"error": "failed to trigger incident", "details": str(e)}
-            ),
-            500,
-        )
+        return jsonify({"error": "failed to trigger incident", "details": str(e)}), 500
 
 
-# ── API: ASSIGN ─────────────────────────────────────────
 @app.route("/api/incident/<incident_id>/assign", methods=["PATCH"])
 def assign(incident_id):
     try:
         data = request.get_json() or {}
-        developer = data.get("developer_name", "").strip()
+        developer = (data.get("developer_name") or "").strip()
 
         if not developer:
             return jsonify({"error": "developer_name required"}), 400
@@ -213,19 +207,11 @@ def assign(incident_id):
         return jsonify({"status": "assigned", "assigned_to": developer})
 
     except Exception as e:
-        logger.error(
-            "[ERROR] /api/incident/%s/assign failed: %s", incident_id, str(e)
-        )
+        logger.error("[ERROR] /api/incident/%s/assign failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return (
-            jsonify(
-                {"error": "failed to assign incident", "details": str(e)}
-            ),
-            500,
-        )
+        return jsonify({"error": "failed to assign incident", "details": str(e)}), 500
 
 
-# ── API: RESOLVE ────────────────────────────────────────
 @app.route("/api/incident/<incident_id>/resolve", methods=["PATCH"])
 def resolve(incident_id):
     try:
@@ -248,19 +234,11 @@ def resolve(incident_id):
         return jsonify({"status": "resolved"})
 
     except Exception as e:
-        logger.error(
-            "[ERROR] /api/incident/%s/resolve failed: %s", incident_id, str(e)
-        )
+        logger.error("[ERROR] /api/incident/%s/resolve failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return (
-            jsonify(
-                {"error": "failed to resolve incident", "details": str(e)}
-            ),
-            500,
-        )
+        return jsonify({"error": "failed to resolve incident", "details": str(e)}), 500
 
 
-# ── API: READ INCIDENTS & LOGS ──────────────────────────
 @app.route("/api/incident/<incident_id>", methods=["GET"])
 def get_one(incident_id):
     try:
@@ -272,12 +250,7 @@ def get_one(incident_id):
     except Exception as e:
         logger.error("[ERROR] /api/incident/%s failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return (
-            jsonify(
-                {"error": "failed to fetch incident", "details": str(e)}
-            ),
-            500,
-        )
+        return jsonify({"error": "failed to fetch incident", "details": str(e)}), 500
 
 
 @app.route("/api/logs/<incident_id>", methods=["GET"])
@@ -288,10 +261,7 @@ def get_incident_logs(incident_id):
     except Exception as e:
         logger.error("[ERROR] /api/logs/%s failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return (
-            jsonify({"error": "failed to fetch logs", "details": str(e)}),
-            500,
-        )
+        return jsonify({"error": "failed to fetch logs", "details": str(e)}), 500
 
 
 @app.route("/api/incidents", methods=["GET"])
@@ -302,12 +272,7 @@ def get_all():
     except Exception as e:
         logger.error("[ERROR] /api/incidents failed: %s", str(e))
         traceback.print_exc()
-        return (
-            jsonify(
-                {"error": "failed to fetch incidents", "details": str(e)}
-            ),
-            500,
-        )
+        return jsonify({"error": "failed to fetch incidents", "details": str(e)}), 500
 
 
 @app.route("/api/past-incidents", methods=["GET"])
@@ -318,15 +283,9 @@ def get_past():
     except Exception as e:
         logger.error("[ERROR] /api/past-incidents failed: %s", str(e))
         traceback.print_exc()
-        return (
-            jsonify(
-                {"error": "failed to fetch past incidents", "details": str(e)}
-            ),
-            500,
-        )
+        return jsonify({"error": "failed to fetch past incidents", "details": str(e)}), 500
 
 
-# ── API: HEALTH ─────────────────────────────────────────
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
