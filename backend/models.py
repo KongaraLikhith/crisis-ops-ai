@@ -49,10 +49,6 @@ class Incident(db.Model):
             "severity IN ('P0', 'P1', 'P2') OR severity IS NULL",
             name="chk_incidents_severity"
         ),
-        CheckConstraint(
-            "status IN ('processing', 'in_triage', 'agents_done', 'assigned', 'resolved', 'in_progress', 'escalated')",
-            name="chk_incidents_status"
-        ),
         Index("idx_incidents_status", "status"),
         Index("idx_incidents_severity", "severity"),
         Index("idx_incidents_created_at", db.text("created_at DESC")),
