@@ -7,7 +7,10 @@ from google.adk import Agent
 from google.adk.tools.tool_context import ToolContext
 
 from tools.slack_tool import send_slack_message
-from tools.db_tools import log_incident_event
+from tools.db_tools import log_incident_event, get_contacts_by_team
+from tools.mcp_toolkit import GoogleMCPToolkit
+
+mcp = GoogleMCPToolkit()
 
 model_name = os.getenv("MODEL", "gemini-3-flash-preview")
 logger = logging.getLogger(__name__)
@@ -166,9 +169,9 @@ def draft_stakeholder_messages(
 
 def send_internal_updates(
     tool_context: ToolContext,
-    channel: str,
     responder_message: str,
     leadership_message: str,
+    channel: Optional[str] = None,
 ) -> dict:
     incident_id = tool_context.state.get("INCIDENT_ID", "unknown")
 
@@ -176,14 +179,13 @@ def send_internal_updates(
     send_slack_message(channel=channel, message=leadership_message)
     log_incident_event(
         incident_id=incident_id,
-        agent="Comms",
-        action="internal_comms_sent",
-        detail=f"Internal updates sent to {channel}",
+        event_type="internal_comms_sent",
+        detail=f"Internal updates sent to {channel or 'default channel'}",
     )
 
     tool_context.state["INTERNAL_UPDATES_SENT"] = True
     logger.info("[Comms] send_internal_updates: incident=%s channel=%s", incident_id, channel)
-    return {"status": "sent", "channel": channel}
+    return {"status": "sent", "channel": channel or "default"}
 
 
 def save_comms_summary(
@@ -250,12 +252,15 @@ Call `draft_stakeholder_messages` with:
   - next_update_eta    = from Step 1
 
 ━━━ STEP 3 — Send internal updates ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `send_internal_updates`:
-  - channel            = "#inc-{ INCIDENT_ID }"
-  - responder_message  = responder/slack body from Step 2
-  - leadership_message = leadership/slack body from Step 2
+Call `send_internal_updates` with the responder and leadership messages.
+Do NOT specify a channel; it will automatically use the default channel from the environment.
 
 Do NOT send the customer/status page message with Slack. Draft it only.
+
+━━━ STEP 4 — Send Email Alerts (P0/P1 only) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Call `get_contacts_by_team` for the impacted teams.
+2. For each contact, call `send_email` with a concise incident brief if severity is P0 or P1.
+3. Include "Email alerts sent" in your summary if successful.
 
 ━━━ STEP 4 — Save the communications summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `save_comms_summary` with a concise summary covering:
@@ -291,6 +296,8 @@ TRIAGE_REPORT: { triage_report }
         save_comms_summary,
         send_slack_message,
         log_incident_event,
+        get_contacts_by_team,
+        *mcp.get_tools(),
     ],
     output_key="comms_summary",
 )

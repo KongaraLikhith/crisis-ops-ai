@@ -26,12 +26,24 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-APP_NAME = "crisisops"
-VALID_SEVERITIES = {"P0", "P1", "P2"}
-DEFAULT_SEVERITY = "P2"
+# ── Quota Mitigation (Rate Limiting) ──────────────────────
+import asyncio
+from google.adk.models.google_llm import Gemini
+
+_original_generate = Gemini.generate_content_async
+
+async def patched_generate_content_async(self, *args, **kwargs):
+    # Add a 5 second sleep before every single AI request to stay under 15 RPM
+    logger.info("[Quota] Sleeping 5s to stay under Free Tier limits...")
+    await asyncio.sleep(5)
+    async for event in _original_generate(self, *args, **kwargs):
+        yield event
+
+Gemini.generate_content_async = patched_generate_content_async
 
 # ── App setup ────────────────────────────────────────────
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
+
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -64,8 +76,7 @@ def _get_runner():
     """
     from google.adk.runners import InMemoryRunner
     from agents.commander import root_agent
-
-    return InMemoryRunner(agent=root_agent)
+    return InMemoryRunner(agent=root_agent, app_name="crisisops")
 
 
 async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
@@ -76,8 +87,8 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
     from google.adk.sessions import InMemorySessionService
     import google.genai.types as types
 
-    session_service = InMemorySessionService()
     runner = _get_runner()
+    session_service = runner.session_service
 
     report_text = (
         f"Title: {title}\n"
@@ -89,10 +100,20 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         app_name=APP_NAME,
         user_id="system",
         session_id=incident_id,
-        state={"INCIDENT_REPORT": report_text},
+        state={
+            "INCIDENT_REPORT": report_text,
+            "INCIDENT_ID": incident_id,
+            "INCIDENT_TITLE": title,
+            # Pre-seed downstream keys so agent instruction templates never
+            # raise KeyError if an upstream agent fails to write its output.
+            "intake_summary": "",
+            "triage_report": "",
+            "comms_summary": "",
+        },
     )
 
-    initial_message = types.Content(
+    from google.genai.types import Content, Part
+    initial_message = Content(
         role="user",
         parts=[types.Part(text=report_text)],
     )
@@ -101,16 +122,19 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         user_id="system",
         session_id=incident_id,
         new_message=initial_message,
-        session_service=session_service,
     ):
-        pass
+        # Capture the final session state once the run completes
+        if hasattr(event, "state"):
+            final_state = event.state
 
-    stored = await session_service.get_session(
-        app_name=APP_NAME,
-        user_id="system",
-        session_id=incident_id,
-    )
-    final_state = stored.state if stored else {}
+    # If state wasn't emitted as an event, fetch it directly from the session
+    if not final_state:
+        stored = await session_service.get_session(
+            app_name=runner.app_name,
+            user_id="system",
+            session_id=incident_id,
+        )
+        final_state = stored.state if stored else {}
 
     logger.info(
         "[Pipeline] Completed for %s. State keys: %s",
@@ -136,9 +160,8 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
 
 
 def run_agents_background(incident_id: str, title: str, description: str):
-    """
-    Background thread entry point. Creates its own event loop and app context.
-    """
+    """Runs inside a daemon thread — creates its own event loop and app context."""
+    logger.info("[Background] Starting agent pipeline for %s", incident_id)
     try:
         with app.app_context():
             results = asyncio.run(_run_pipeline(incident_id, title, description))
@@ -291,5 +314,18 @@ def health():
     return jsonify({"status": "ok"})
 
 
+# ── Serve Frontend ─────────────────────────────────────
+from flask import send_from_directory
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=8000)
+
+    app.run(debug=False, port=8000)

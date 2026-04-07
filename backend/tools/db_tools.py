@@ -2,6 +2,7 @@ from datetime import datetime
 
 from models import db, Incident, IncidentLog, PastIncident
 from tools.embedding_tool import embed_resolved_incident
+from sqlalchemy.orm import joinedload
 
 VALID_SEVERITIES = {"P0", "P1", "P2"}
 DEFAULT_SEVERITY = "P2"
@@ -24,12 +25,14 @@ def save_incident(incident_id, title, description):
     )
     db.session.add(inc)
     db.session.commit()
-
-
 def create_incident(incident_id: str, title: str, description: str):
-    """Create a new incident and return the stored row as a dict."""
+    """Alias used by commander intake agent. Checks for existence first."""
+    existing = Incident.query.get(incident_id)
+    if existing:
+        return existing.to_dict()
+    
     save_incident(incident_id, title, description)
-    inc = db.session.get(Incident, incident_id)
+    inc = Incident.query.get(incident_id)
     return inc.to_dict() if inc else {"incident_id": incident_id}
 
 
@@ -97,13 +100,11 @@ def log_incident_event(
 
 
 def list_open_incidents():
-    """List unresolved incidents."""
-    incs = (
-        Incident.query.filter(Incident.status != "resolved")
-        .order_by(Incident.created_at.desc())
-        .limit(50)
-        .all()
-    )
+    incs = Incident.query \
+        .options(joinedload(Incident.past_incident)) \
+        .filter(Incident.status != "resolved") \
+        .order_by(Incident.created_at.desc()) \
+        .limit(50).all()
     return [i.to_dict() for i in incs]
 
 
@@ -251,8 +252,7 @@ def _graduate_to_history(inc, agent_was_correct, human_root_cause, human_resolut
 
 # ── READ ─────────────────────────────────────────────────
 def get_incident(incident_id):
-    """Fetch a single incident as a dict."""
-    inc = db.session.get(Incident, incident_id)
+    inc = Incident.query.options(joinedload(Incident.past_incident)).get(incident_id)
     return inc.to_dict() if inc else None
 
 
@@ -267,8 +267,10 @@ def get_logs(incident_id):
 
 
 def list_incidents():
-    """Fetch recent incidents."""
-    incs = Incident.query.order_by(Incident.created_at.desc()).limit(30).all()
+    incs = Incident.query \
+        .options(joinedload(Incident.past_incident)) \
+        .order_by(Incident.created_at.desc()) \
+        .limit(30).all()
     return [i.to_dict() for i in incs]
 
 
@@ -286,3 +288,51 @@ def get_past_incident_from_db(incident_id):
         .all()
     )
     return [r.to_dict() for r in rows]
+
+
+# ── DEV 3 MCP TOOLS ──────────────────────────────────────
+
+def get_similar_incidents(embedding: list[float], limit: int = 3):
+    """
+    Perform semantic search for past incidents.
+    Falls back to a safe empty list if pgvector is not available (e.g. SQLite).
+    """
+    if not embedding:
+        return []
+        
+    try:
+        # Cosine distance similarity search - Requires pgvector
+        results = PastIncident.query \
+            .order_by(PastIncident.embedding.cosine_distance(embedding)) \
+            .limit(limit).all()
+        return [r.to_dict() for r in results]
+    except Exception as e:
+        # Graceful fallback for SQLite or missing extension
+        print(f"[DB] Similarity search skipped (pgvector not available): {e}")
+        return []
+
+
+def get_runbook_by_type(incident_type: str):
+    """
+    Fetch the remediation runbook for a specific incident category.
+    """
+    from models import Runbook
+    rb = Runbook.query.filter_by(incident_type=incident_type).first()
+    return rb.to_dict() if rb else None
+
+
+def get_contacts_by_team(team: str):
+    """
+    Fetch stakeholder contact info for a specific team.
+    """
+    from models import Contact
+    contacts = Contact.query.filter_by(team=team).all()
+    return [c.to_dict() for c in contacts]
+
+
+def log_timeline_event(incident_id: str, actor: str, action: str, detail: str):
+    """
+    Record an agent action in the timeline (alias for log_action).
+    """
+    return log_action(incident_id, agent=actor, action=action, detail=detail)
+

@@ -15,7 +15,10 @@ const sevStyle = {
 // Map status to badge colours
 const statusStyle = {
   processing:  'bg-[#f0eeff] text-[#7F77DD]',
+  in_triage:   'bg-[#f0eeff] text-[#7F77DD]',
   agents_done: 'bg-[#fef3c7] text-[#92400e]',
+  in_progress: 'bg-blue-50 text-blue-700',
+  escalated:   'bg-[#fde8e8] text-[#c53030]',
   assigned:    'bg-blue-50 text-blue-700',
   resolved:    'bg-[#e6f7f1] text-[#276749]',
 }
@@ -23,7 +26,10 @@ const statusStyle = {
 // Nice labels for statuses
 const statusLabel = {
   processing:  'Processing',
+  in_triage:   'In Triage',
   agents_done: 'Agents Done',
+  in_progress: 'In Progress',
+  escalated:   'Escalated',
   assigned:    'Assigned',
   resolved:    'Resolved',
 }

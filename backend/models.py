@@ -45,14 +45,7 @@ class Incident(db.Model):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "severity IN ('P0', 'P1', 'P2') OR severity IS NULL",
-            name="chk_incidents_severity"
-        ),
-        CheckConstraint(
-            "status IN ('processing', 'agents_done', 'assigned', 'resolved')",
-            name="chk_incidents_status"
-        ),
+
         Index("idx_incidents_status", "status"),
         Index("idx_incidents_severity", "severity"),
         Index("idx_incidents_created_at", db.text("created_at DESC")),
@@ -63,7 +56,7 @@ class Incident(db.Model):
         return f"<Incident {self.id} - {self.title}>"
 
     def to_dict(self):
-        return {
+        d = {
             "id": self.id,
             "title": self.title,
             "description": self.description,
@@ -76,6 +69,15 @@ class Incident(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+        # Include agent analysis if it exists in the linked PastIncident record
+        past = self.past_incident
+
+        if past:
+            d["agent_root_cause"] = past.agent_root_cause
+            d["agent_resolution"] = past.agent_resolution
+            d["agent_comms"] = past.agent_comms
+            d["agent_postmortem"] = past.agent_postmortem
+        return d
 
 
 # =========================
@@ -197,4 +199,50 @@ class PastIncident(db.Model):
             "embedding": self.embedding,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# =========================
+# 4) RUNBOOKS
+# =========================
+class Runbook(db.Model):
+    __tablename__ = "runbooks"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    title = db.Column(db.Text, nullable=False)
+    incident_type = db.Column(db.Text, nullable=False)  # e.g., 'database', 'auth'
+    steps_json = db.Column(db.JSON, nullable=False)    # List of steps
+    tags = db.Column(db.Text)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "incident_type": self.incident_type,
+            "steps": self.steps_json,
+            "tags": self.tags,
+        }
+
+
+# =========================
+# 5) CONTACTS
+# =========================
+class Contact(db.Model):
+    __tablename__ = "contacts"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.Text, nullable=False)
+    team = db.Column(db.Text, nullable=False)  # e.g., 'platform', 'security'
+    role = db.Column(db.Text)
+    gmail_address = db.Column(db.Text)
+    calendar_id = db.Column(db.Text)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "team": self.team,
+            "role": self.role,
+            "gmail_address": self.gmail_address,
+            "calendar_id": self.calendar_id,
         }

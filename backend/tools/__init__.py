@@ -12,6 +12,10 @@ from .db_tools import (
     agents_done,
     assign_incident,
     resolve_incident,
+    get_similar_incidents,
+    get_runbook_by_type,
+    get_contacts_by_team,
+    log_timeline_event,
 )
 
 from .slack_tool import (
@@ -41,6 +45,10 @@ __all__ = [
     "agents_done",
     "assign_incident",
     "resolve_incident",
+    "get_similar_incidents",
+    "get_runbook_by_type",
+    "get_contacts_by_team",
+    "log_timeline_event",
     "send_slack_message",
     "create_slack_channel",
     "post_to_slack",

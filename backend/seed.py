@@ -116,8 +116,51 @@ with app.app_context():
                 )
                 db.session.add(pi)
 
-            db.session.commit()
-            print(f"Seeded {len(SEED_DATA)} past incidents.")
+        db.session.commit()
+        print(f"Seeded {len(SEED_DATA)} past incidents.")
+
+        # ── Seed Runbooks ──
+        RUNBOOKS = [
+            {
+                "title": "Database Outage Runbook",
+                "incident_type": "database_performance",
+                "steps_json": [
+                    {"order": 1, "step": "Check Cloud SQL connection metrics"},
+                    {"order": 2, "step": "Verify active connection count"},
+                    {"order": 3, "step": "Scale connection pool in app config"},
+                    {"order": 4, "step": "Restart impacted app instances"}
+                ],
+                "tags": "sql, connections, scaling"
+            },
+            {
+                "title": "Auth Regression Runbook",
+                "incident_type": "authentication",
+                "steps_json": [
+                    {"order": 1, "step": "Check recent deploy logs for config errors"},
+                    {"order": 2, "step": "Verify JWT keys in Secret Manager"},
+                    {"order": 3, "step": "Revert to previous stable tag"},
+                    {"order": 4, "step": "Verify login health check"}
+                ],
+                "tags": "auth, jwt, deploy"
+            }
+        ]
+        from models import Runbook, Contact
+        for rb_data in RUNBOOKS:
+            if not Runbook.query.filter_by(incident_type=rb_data["incident_type"]).first():
+                db.session.add(Runbook(**rb_data))
+        
+        # ── Seed Contacts ──
+        CONTACTS = [
+            {"name": "DevOps On-Call", "team": "platform", "role": "On-Call Engineer", "gmail_address": "devops@example.com", "calendar_id": "primary"},
+            {"name": "Security Lead", "team": "security", "role": "Incident Responder", "gmail_address": "security@example.com", "calendar_id": "primary"},
+            {"name": "DBA Team", "team": "dba", "role": "Database Administrator", "gmail_address": "dba@example.com", "calendar_id": "primary"}
+        ]
+        for c_data in CONTACTS:
+            if not Contact.query.filter_by(name=c_data["name"]).first():
+                db.session.add(Contact(**c_data))
+
+        db.session.commit()
+        print("Seeded Runbooks and Contacts.")
 
     except Exception as e:
         db.session.rollback()

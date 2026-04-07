@@ -35,40 +35,25 @@ def create_war_room(
     if severity != "P0":
         return f"War room skipped — only created for P0 incidents (this is {severity})"
 
-    creds_path = os.path.join(os.path.dirname(__file__), "..", "credentials.json")
-    token_path = os.path.join(os.path.dirname(__file__), "..", "token.json")
-
-    if not os.path.exists(creds_path):
-        print("[Calendar] credentials.json not found — skipping war room creation")
+    # Check if Google Calendar is configured
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not creds_path or not os.path.exists(creds_path):
+        print("[Calendar] Service account credentials not found — skipping war room creation")
         return _fallback_war_room(incident_id, title)
 
     try:
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
         from googleapiclient.discovery import build
 
-        scopes = ["https://www.googleapis.com/auth/calendar"]
-        creds = None
-
-        if os.path.exists(token_path):
-            creds = Credentials.from_authorized_user_file(token_path, scopes)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(creds_path, scopes)
-                creds = flow.run_local_server(port=0)
-
-            with open(token_path, "w") as f:
-                f.write(creds.to_json())
-
+        SCOPES = ["https://www.googleapis.com/auth/calendar"]
+        creds = service_account.Credentials.from_service_account_file(creds_path, scopes=SCOPES)
         service = build("calendar", "v3", credentials=creds)
 
         now = datetime.utcnow()
         start_iso = now.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
         end_iso = (now + timedelta(minutes=duration_minutes)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+
+        fake_meet = f"meet.google.com/crisis-{incident_id.lower().replace('inc-', '')}"
 
         event = {
             "summary": f"🚨 War Room: {title}",
@@ -76,6 +61,7 @@ def create_war_room(
                 f"Incident ID: {incident_id}\n"
                 f"Severity: {severity}\n"
                 f"Auto-created by CrisisOps AI.\n\n"
+                f"Join the war room: https://{fake_meet}\n\n"
                 f"Triage results and post-mortem available in the CrisisOps dashboard."
             ),
             "start": {
@@ -86,25 +72,17 @@ def create_war_room(
                 "dateTime": end_iso,
                 "timeZone": "UTC",
             },
-            "conferenceData": {
-                "createRequest": {
-                    "requestId": incident_id,
-                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
-                }
-            },
         }
 
         created = service.events().insert(
             calendarId="primary",
             body=event,
-            conferenceDataVersion=1,
         ).execute()
 
-        meet_link = created.get("hangoutLink", "")
         event_url = created.get("htmlLink", "")
 
-        print(f"[Calendar] War room created: {meet_link}")
-        return f"War room created: {meet_link} | Calendar event: {event_url}"
+        print(f"[Calendar] War room created: {event_url}")
+        return f"War room created: {fake_meet} | Calendar event: {event_url}"
 
     except ImportError:
         print(

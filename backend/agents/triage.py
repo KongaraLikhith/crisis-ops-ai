@@ -11,6 +11,8 @@ from tools.db_tools import (
     get_incident,
     update_incident_status,
     log_incident_event,
+    get_similar_incidents,
+    get_runbook_by_type,
 )
 
 model_name = os.getenv("MODEL", "gemini-3-flash-preview")
@@ -313,19 +315,26 @@ Call `calculate_blast_radius` using:
   - confirmed_severity    = value from STEP 1
   - affected_system_count = length of AFFECTED_SYSTEMS from STEP 2
 
-━━━ STEP 5 — Escalate if required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 4 — Search for Similar Incidents & Runbooks ━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Call `get_similar_incidents` using the description to find historical context.
+2. Call `get_runbook_by_type` using the identified system or category to retrieve remediation steps.
+3. Include these findings in your summary.
+
+━━━ STEP 5 — Escalate if required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 If the recommended_action is 'page_oncall' or 'executive_brief', call
 `escalate_to_oncall` with:
   - team   = the most appropriate on-call team (platform | security | dba | executive)
   - reason = a short justification referencing severity and blast radius.
 
-━━━ STEP 6 — Save the triage report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ STEP 6 — Save the triage report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Call `save_triage_report` with a 1–2 sentence plain-English summary of:
   - confirmed severity
   - blast radius
   - key affected systems
   - recommended action
-  - whether similar past incidents suggest a likely root cause or fix
+  - similar past incident IDs (if found)
+
+Finally, present a concise triage summary back to the user.
 
 Finally, present a concise triage summary back to the user.
 
@@ -346,6 +355,8 @@ INCIDENT_DESCRIPTION:
         get_incident,
         update_incident_status,
         log_incident_event,
+        get_similar_incidents,
+        get_runbook_by_type,
     ],
     output_key="triage_report",
 )
