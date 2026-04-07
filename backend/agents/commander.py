@@ -21,9 +21,15 @@ from agents.comms import comms_agent
 from agents.docs_agent import docs_agent
 
 # ── Environment ────────────────────────────────────────────────────────────────
-model_name = os.getenv("MODEL", "gemini-2.0-flash")
+model_name = os.getenv("MODEL", "gemini-3-flash-preview")
 
 logger = logging.getLogger(__name__)
+
+# ── Severity ordering reference ────────────────────────────────────────────────
+# P0 = most critical   (full immediate response, executive notification)
+# P1 = high severity   (urgent response, team lead notification)
+# P2 = moderate        (standard response, no executive escalation)
+SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -40,7 +46,19 @@ def save_incident_to_state(
     """
     Persist the active incident context into agent state so every
     downstream sub-agent can reference it without extra DB round-trips.
+
+    Severity must be one of P0, P1, or P2.
+      P0 → most severe  (immediate full escalation)
+      P1 → high         (urgent response)
+      P2 → moderate     (standard response)
     """
+    severity = severity.upper().strip()
+    if severity not in SEVERITY_ORDER:
+        logger.warning(
+            "[State] Unrecognised severity '%s' — defaulting to P2", severity
+        )
+        severity = "P2"
+
     tool_context.state["INCIDENT_ID"] = incident_id
     tool_context.state["INCIDENT_TITLE"] = title
     tool_context.state["INCIDENT_SEVERITY"] = severity
@@ -105,12 +123,21 @@ intake_agent = Agent(
     When an incident is reported:
     1. Extract the following fields from the user message:
        - title        : short one-line summary
-       - severity     : one of [P1 | P2 | P3 | P4]
+       - severity     : one of [P0 | P1 | P2]
+                        P0 = most critical, P1 = high, P2 = moderate
        - description  : full details as provided
 
     2. Call `create_incident` to persist the incident in the database.
     3. Call `save_incident_to_state` so downstream agents share the context.
     4. Acknowledge receipt: confirm the incident ID, title, and severity.
+
+    SEVERITY SCALE (P0 is highest, P2 is lowest):
+    - P0: Critical — complete service outage, data loss, or security breach.
+          Triggers immediate full escalation including executive notification.
+    - P1: High — major degradation or partial outage affecting many users.
+          Triggers urgent team response and lead notification.
+    - P2: Moderate — limited impact, workaround available.
+          Triggers standard response; no executive escalation.
 
     Be concise and professional. This is an emergency operations context.
 
@@ -144,7 +171,13 @@ coordination_agent = Agent(
     1. Call `create_slack_channel` to open a dedicated incident channel
        named  #inc-<INCIDENT_ID>.
     2. Call `send_slack_message` to post the incident brief in that channel.
+       - For P0: prefix message with 🔴 CRITICAL and page on-call + executives.
+       - For P1: prefix with 🟠 HIGH and page on-call team lead.
+       - For P2: prefix with 🟡 MODERATE and notify the on-call engineer.
     3. Call `create_calendar_event` to schedule an immediate war-room bridge.
+       - P0: schedule immediately (within 5 minutes).
+       - P1: schedule within 15 minutes.
+       - P2: schedule within 1 hour or at next available slot.
     4. Call `log_incident_event` to record "coordination_started" in the DB.
 
     Keep all messages factual and urgent. Include severity and incident ID.
@@ -186,15 +219,22 @@ resolution_agent = Agent(
        - in_progress → still being worked on
        - escalated   → requires executive or vendor involvement
 
-    2. Call `update_incident_status` to persist the new status in the DB.
-    3. Call `update_incident_in_state` to update shared state.
-    4. Call `send_slack_message` to post a closing / status update to the
+    2. Apply severity-aware escalation rules:
+       - P0: if not resolved within 30 min, auto-escalate; require exec sign-off
+             to close.
+       - P1: if not resolved within 2 hours, escalate to team lead.
+       - P2: standard SLA; no automatic escalation.
+
+    3. Call `update_incident_status` to persist the new status in the DB.
+    4. Call `update_incident_in_state` to update shared state.
+    5. Call `send_slack_message` to post a closing / status update to the
        incident channel.
-    5. Call `log_incident_event` to record "status_change" in the DB.
+    6. Call `log_incident_event` to record "status_change" in the DB.
 
     Be clear and definitive. Include next steps if the incident is not resolved.
 
     INCIDENT_ID:    { INCIDENT_ID }
+    SEVERITY:       { INCIDENT_SEVERITY }
     TRIAGE_REPORT:  { triage_report }
     COMMS_SUMMARY:  { comms_summary }
     """,
@@ -221,7 +261,7 @@ crisis_workflow = SequentialAgent(
     ),
     sub_agents=[
         intake_agent,       # Step 1: Ingest & persist the incident
-        triage_agent,       # Step 2: Assess impact and severity
+        triage_agent,       # Step 2: Assess impact and severity (P0/P1/P2)
         comms_agent,        # Step 3: Draft stakeholder communications
         docs_agent,         # Step 4: Generate incident runbook / log
         coordination_agent, # Step 5: Mobilise team via Slack + Calendar
@@ -251,6 +291,11 @@ commander = Agent(
     You are the CrisisOps Commander — the primary orchestrator for all
     crisis and incident management operations.
 
+    SEVERITY SCALE (always refer to this when classifying or discussing incidents):
+      P0 → Critical  — most severe. Immediate full escalation.
+      P1 → High      — urgent. Team-lead-level response.
+      P2 → Moderate  — least severe of the active priorities. Standard SLA.
+
     You have two responsibilities:
 
     ── INCIDENT RESPONSE ──────────────────────────────────────────────────────
@@ -262,7 +307,8 @@ commander = Agent(
     ── STATUS QUERIES ─────────────────────────────────────────────────────────
     When the user asks about EXISTING incidents:
     - Use `list_open_incidents` or `get_incident` to retrieve current data.
-    - Summarise the incident status, severity, and any open action items.
+    - Summarise the incident status, severity (P0/P1/P2), and any open
+      action items.
     - If relevant, check `get_upcoming_events` for scheduled bridge calls.
 
     Always maintain a calm, authoritative tone. This is a high-stakes
