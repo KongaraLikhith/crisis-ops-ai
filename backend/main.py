@@ -47,6 +47,10 @@ app = Flask(__name__, static_folder='static')
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+APP_NAME = "crisisops"
+VALID_SEVERITIES = {"P0", "P1", "P2"}
+DEFAULT_SEVERITY = "P2"
+
 CORS(
     app,
     resources={
