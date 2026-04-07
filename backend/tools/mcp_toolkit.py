@@ -27,6 +27,7 @@ class GoogleMCPToolkit:
         self.calendar_service = None
         self.docs_service = None
         self.sheets_service = None
+        self.drive_service = None
         self._init_services()
 
     def _init_services(self):
@@ -37,6 +38,7 @@ class GoogleMCPToolkit:
             scopes = [
                 'https://www.googleapis.com/auth/documents',
                 'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive',
                 'https://www.googleapis.com/auth/calendar',
                 'https://www.googleapis.com/auth/gmail.send'
             ]
@@ -52,6 +54,7 @@ class GoogleMCPToolkit:
             self.calendar_service = build('calendar', 'v3', credentials=self.creds, cache_discovery=False)
             self.docs_service = build('docs', 'v1', credentials=self.creds, cache_discovery=False)
             self.sheets_service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
+            self.drive_service = build('drive', 'v3', credentials=self.creds, cache_discovery=False)
             logger.info("[MCP] Google Workspace services initialized successfully.")
         except Exception as e:
             logger.warning(f"[MCP] Failed to init Workspace services: {e}. Falling back to mock/log mode.")
@@ -104,15 +107,21 @@ class GoogleMCPToolkit:
             return {"status": "ok", "doc_id": f"mock_doc_{int(datetime.now().timestamp())}", "doc_url": "#"}
             
         try:
-            body = {'title': title}
-            if PARENT_FOLDER_ID:
-                body['parents'] = [PARENT_FOLDER_ID]
-            
-            doc = self.docs_service.documents().create(body=body).execute()
+            doc = self.docs_service.documents().create(body={'title': title}).execute()
             doc_id = doc.get('documentId')
-            # Mock append initial content
-            return {"status": "ok", "doc_id": doc_id, "doc_url": f"https://docs.google.com/document/d/{doc_id}"}
+
+            # Share with anyone who has the link (writable)
+            if self.drive_service:
+                self.drive_service.permissions().create(
+                    fileId=doc_id,
+                    body={'type': 'anyone', 'role': 'writer'},
+                ).execute()
+
+            doc_url = f"https://docs.google.com/document/d/{doc_id}"
+            logger.info(f"[Docs] Created and shared: {doc_url}")
+            return {"status": "ok", "doc_id": doc_id, "doc_url": doc_url}
         except Exception as e:
+            logger.warning(f"[Docs] Error creating document: {e}")
             return {"status": "error", "message": str(e)}
 
     async def append_to_doc(self, doc_id: str, content: str) -> dict:
@@ -135,16 +144,34 @@ class GoogleMCPToolkit:
         logger.info(f"[Sheets] Creating spreadsheet: {title}")
         if not self.sheets_service:
             return {"status": "ok", "sheet_id": f"mock_sheet_{int(datetime.now().timestamp())}", "sheet_url": "#"}
-            
+
         try:
-            body = {'properties': {'title': title}}
-            if PARENT_FOLDER_ID:
-                body['parents'] = [PARENT_FOLDER_ID]
-                
-            spreadsheet = self.sheets_service.spreadsheets().create(body=body).execute()
+            spreadsheet = self.sheets_service.spreadsheets().create(
+                body={'properties': {'title': title}}
+            ).execute()
             sheet_id = spreadsheet.get('spreadsheetId')
-            return {"status": "ok", "sheet_id": sheet_id, "sheet_url": f"https://docs.google.com/spreadsheets/d/{sheet_id}"}
+
+            # Write headers to first row
+            if headers:
+                self.sheets_service.spreadsheets().values().update(
+                    spreadsheetId=sheet_id,
+                    range="Sheet1!A1",
+                    valueInputOption="RAW",
+                    body={'values': [headers]},
+                ).execute()
+
+            # Share with anyone who has the link (readable)
+            if self.drive_service:
+                self.drive_service.permissions().create(
+                    fileId=sheet_id,
+                    body={'type': 'anyone', 'role': 'writer'},
+                ).execute()
+
+            sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+            logger.info(f"[Sheets] Created and shared: {sheet_url}")
+            return {"status": "ok", "sheet_id": sheet_id, "sheet_url": sheet_url}
         except Exception as e:
+            logger.warning(f"[Sheets] Error creating spreadsheet: {e}")
             return {"status": "error", "message": str(e)}
 
     async def append_row(self, sheet_id: str, row_data: List) -> dict:

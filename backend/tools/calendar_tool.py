@@ -45,12 +45,15 @@ def create_war_room(incident_id: str, title: str,
         start_iso = now.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
         end_iso   = (now + timedelta(minutes=duration_minutes)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
 
+        fake_meet = f"meet.google.com/crisis-{incident_id.lower().replace('inc-', '')}"
+
         event = {
             "summary": f"🚨 War Room: {title}",
             "description": (
                 f"Incident ID: {incident_id}\n"
                 f"Severity: {severity}\n"
                 f"Auto-created by CrisisOps AI.\n\n"
+                f"Join the war room: https://{fake_meet}\n\n"
                 f"Triage results and post-mortem available in the CrisisOps dashboard."
             ),
             "start": {
@@ -61,26 +64,17 @@ def create_war_room(incident_id: str, title: str,
                 "dateTime": end_iso,
                 "timeZone": "UTC",
             },
-            # This tells Google to create a Meet link
-            "conferenceData": {
-                "createRequest": {
-                    "requestId": incident_id,
-                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
-                }
-            },
         }
 
         created = service.events().insert(
             calendarId="primary",
             body=event,
-            conferenceDataVersion=1,   # required to get Meet link
         ).execute()
 
-        meet_link = created.get("hangoutLink", "")
         event_url = created.get("htmlLink", "")
 
-        print(f"[Calendar] War room created: {meet_link}")
-        return f"War room created: {meet_link} | Calendar event: {event_url}"
+        print(f"[Calendar] War room created: {event_url}")
+        return f"War room created: {fake_meet} | Calendar event: {event_url}"
 
     except ImportError:
         print("[Calendar] Google libraries not installed. Run: pip install google-api-python-client google-auth-oauthlib")
