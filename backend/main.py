@@ -14,8 +14,10 @@ from tools.db_tools import (
     agents_done,
     assign_incident,
     get_incident,
+    get_kb_stats,
     get_logs,
     get_past_incidents_all,
+    get_similarity_response,
     list_incidents,
     log_action,
     resolve_incident,
@@ -122,7 +124,8 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         parts=[types.Part(text=report_text)],
     )
 
-    async for _ in runner.run_async(
+    final_state = {}
+    async for event in runner.run_async(
         user_id="system",
         session_id=incident_id,
         new_message=initial_message,
@@ -280,6 +283,16 @@ def get_one(incident_id):
         return jsonify({"error": "failed to fetch incident", "details": str(e)}), 500
 
 
+@app.route("/api/incident/<incident_id>/similar", methods=["GET"])
+def get_similar(incident_id):
+    try:
+        return jsonify(get_similarity_response(incident_id))
+    except Exception as e:
+        logger.error("[ERROR] /api/incident/%s/similar failed: %s", incident_id, str(e))
+        traceback.print_exc()
+        return jsonify({"error": "failed to fetch similar incidents", "details": str(e)}), 500
+
+
 @app.route("/api/logs/<incident_id>", methods=["GET"])
 def get_incident_logs(incident_id):
     try:
@@ -311,6 +324,16 @@ def get_past():
         logger.error("[ERROR] /api/past-incidents failed: %s", str(e))
         traceback.print_exc()
         return jsonify({"error": "failed to fetch past incidents", "details": str(e)}), 500
+
+
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    try:
+        return jsonify(get_kb_stats())
+    except Exception as e:
+        logger.error("[ERROR] /api/stats failed: %s", str(e))
+        traceback.print_exc()
+        return jsonify({"error": "failed to fetch stats", "details": str(e)}), 500
 
 
 @app.route("/api/health", methods=["GET"])

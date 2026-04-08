@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from models import db, Incident, IncidentLog, PastIncident
-from tools.embedding_tool import embed_resolved_incident
+from tools.embedding_tool import embed_text, embed_resolved_incident
 from sqlalchemy.orm import joinedload
 
 VALID_SEVERITIES = {"P0", "P1", "P2"}
@@ -253,7 +253,40 @@ def _graduate_to_history(inc, agent_was_correct, human_root_cause, human_resolut
 # ── READ ─────────────────────────────────────────────────
 def get_incident(incident_id):
     inc = Incident.query.options(joinedload(Incident.past_incident)).get(incident_id)
-    return inc.to_dict() if inc else None
+    if not inc:
+        return None
+    
+    d = inc.to_dict()
+    
+    # Calculate processing time if agents are done
+    # Processing time = max(created_at) - min(created_at) for incident logs
+    if inc.status in ["agents_done", "assigned", "resolved"]:
+        logs = IncidentLog.query.filter_by(incident_id=incident_id).all()
+        if logs:
+            start_time = min(l.created_at for l in logs)
+            end_time = max(l.created_at for l in logs)
+            delta = end_time - start_time
+            d["processing_time"] = int(delta.total_seconds())
+            
+    return d
+
+
+def get_kb_stats():
+    """Calculate knowledge base statistics."""
+    total_human_verified = PastIncident.query.filter_by(resolution_confidence='human_verified').count()
+    
+    agent_accuracy = 0
+    if total_human_verified > 0:
+        correct_count = PastIncident.query.filter_by(
+            resolution_confidence='human_verified', 
+            agent_was_correct=True
+        ).count()
+        agent_accuracy = int((correct_count / total_human_verified) * 100)
+        
+    return {
+        "human_verified_count": total_human_verified,
+        "agent_accuracy": f"{agent_accuracy}%"
+    }
 
 
 def get_logs(incident_id):
@@ -272,6 +305,26 @@ def list_incidents():
         .order_by(Incident.created_at.desc()) \
         .limit(30).all()
     return [i.to_dict() for i in incs]
+
+
+def get_similarity_response(incident_id):
+    """
+    Find past incidents similar to the current live incident.
+    1. Fetch current incident details.
+    2. Embed title + description.
+    3. Search PastIncident via pgvector.
+    """
+    inc = Incident.query.get(incident_id)
+    if not inc:
+        return []
+
+    text = f"{inc.title} {inc.description or ''}"
+    embedding = embed_text(text)
+    
+    if not embedding:
+        return []
+        
+    return get_similar_incidents(embedding, limit=3)
 
 
 def get_past_incidents_all():

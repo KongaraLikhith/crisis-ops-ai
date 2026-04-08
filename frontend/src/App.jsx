@@ -201,6 +201,11 @@ export default function App() {
                   <span className="text-[10px] text-gray-400 font-mono">
                     {selectedIncident.id}
                   </span>
+                  {selectedIncident.processing_time && (
+                    <span className="text-[13px] text-white font-bold ml-auto bg-[#7F77DD] shadow-sm px-3 py-1.5 rounded-lg flex items-center gap-1.5 animate-pulse">
+                      <span className="text-[16px]">⏱</span> Agents took {selectedIncident.processing_time}s
+                    </span>
+                  )}
                 </div>
                 <h1 className="text-[15px] font-semibold text-gray-800 mb-1">
                   {selectedIncident.title}
@@ -263,7 +268,7 @@ export default function App() {
           <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2 px-1">
             Vector Intelligence
           </p>
-          <VectorPanel />
+          <VectorPanel selectedId={selectedId} />
         </aside>
       </div>
     </div>
