@@ -42,5 +42,13 @@ export const assignIncident = (incidentId, developerName) =>
 // ── Resolve ─────────────────────────────────────────────────────────────
 // Mark an incident as resolved with human feedback
 export const resolveIncident = (incidentId, payload) =>
-  API.patch(`/api/incident/${incidentId}/resolve`, payload)
-    .then(res => res.data)
+    API.patch(`/api/incident/${incidentId}/resolve`, payload)
+      .then(res => res.data)
+  
+  // ── Stats ──────────────────────────────────────────────────────────────
+  export const fetchStats = () =>
+    API.get(`/api/stats?_=${Date.now()}`).then(res => res.data)
+  
+  // ── Similarity ──────────────────────────────────────────────────────────
+  export const fetchSimilarIncidents = (incidentId) =>
+    API.get(`/api/incident/${incidentId}/similar`).then(res => res.data)

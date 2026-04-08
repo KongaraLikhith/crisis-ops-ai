@@ -59,3 +59,103 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d4d2cc; border-radius: 2px; }
+
+/* ── Dark mode ───────────────────────────────────────────── */
+/* Applied via html.dark class (toggled by Navbar button).   */
+/* On first load, Navbar initialises from system preference  */
+/* or saved localStorage value.                              */
+
+html.dark {
+  color-scheme: dark;
+
+  --color-page:         #0e0e16;
+  --color-card-border:  #252535;
+  --color-accent-light: #2a2748;
+
+  --color-sev-p0-bg:   #3a1212;
+  --color-sev-p0-text: #f87171;
+  --color-sev-p1-bg:   #362608;
+  --color-sev-p1-text: #fbbf24;
+  --color-sev-p2-bg:   #0c2a1c;
+  --color-sev-p2-text: #34d399;
+
+  & body {
+    background-color: var(--color-page);
+    color: #dddde8;
+  }
+
+  & ::-webkit-scrollbar-thumb { background: #3a3a52; }
+
+  /* ── White card/panel backgrounds ── */
+  & .bg-white { background-color: #181826 !important; }
+
+  /* ── Page-level backgrounds ── */
+  & .bg-\[\#f5f4f0\] { background-color: #0e0e16 !important; }
+  & .bg-\[\#fafaf8\] { background-color: #1a1a28 !important; }
+  & .bg-\[\#faf9ff\] { background-color: #1e1b38 !important; }
+
+  /* ── Severity / status tinted backgrounds ── */
+  & .bg-\[\#fde8e8\],
+  & .bg-\[\#fef8f8\] { background-color: #3a1212 !important; }
+
+  & .bg-\[\#fef3c7\] { background-color: #362608 !important; }
+
+  & .bg-\[\#e6f7f1\],
+  & .bg-\[\#f0fdf8\],
+  & .bg-\[\#edfdf6\] { background-color: #0c2a1c !important; }
+
+  & .bg-\[\#f0eeff\],
+  & .bg-\[\#eef5ff\] { background-color: #1e1b38 !important; }
+
+  & .bg-\[\#fef9ee\] { background-color: #2d1e06 !important; }
+
+  & .bg-amber-50 { background-color: #2d1e06 !important; }
+  & .bg-blue-50  { background-color: #0e1f38 !important; }
+  & .bg-gray-50  { background-color: #1a1a28 !important; }
+  & .bg-gray-100 { background-color: #252535 !important; }
+  & .bg-gray-200 { background-color: #2e2e42 !important; }
+
+  /* ── Borders ── */
+  & .border-\[\#e5e3dc\] { border-color: #252535 !important; }
+
+  /* ── Text overrides ── */
+  & .text-gray-800 { color: #e2e2ee !important; }
+  & .text-gray-700 { color: #c8c8da !important; }
+  & .text-gray-600 { color: #a0a0b8 !important; }
+  & .text-gray-500 { color: #8080a0 !important; }
+  & .text-gray-400 { color: #60607a !important; }
+  & .text-blue-700 { color: #60a5fa !important; }
+  & .text-amber-600 { color: #fbbf24 !important; }
+
+  & .text-\[\#c53030\] { color: #f87171 !important; }
+  & .text-\[\#92400e\] { color: #fbbf24 !important; }
+  & .text-\[\#276749\] { color: #34d399 !important; }
+  & .text-\[\#0F6E56\] { color: #34d399 !important; }
+
+  /* ── Inputs / select ── */
+  & input, & textarea, & select {
+    background-color: #1a1a28 !important;
+    color: #dddde8 !important;
+    border-color: #252535 !important;
+  }
+  & input::placeholder,
+  & textarea::placeholder { color: #60607a !important; }
+
+  /* ── Navbar bottom border ── */
+  & nav.border-b { border-bottom-color: #252535 !important; }
+
+  /* ── Mock-data banner ── */
+  & .bg-amber-50.border.border-amber-200 {
+    background-color: #2d1e06 !important;
+    border-color: #5a3a10 !important;
+  }
+
+  /* ── Resolved banner ── */
+  & .border-\[\#1D9E75\].bg-\[\#e6f7f1\] { background-color: #0c2a1c !important; }
+
+  /* ── Hover states for incident list ── */
+  & .hover\:bg-gray-50:hover { background-color: #1e1e30 !important; }
+
+  /* ── Processing time badge ── */
+  & .bg-\[\#7F77DD\] { background-color: #5e57c0 !important; }
+}
