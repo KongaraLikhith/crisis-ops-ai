@@ -1,8 +1,11 @@
 from datetime import datetime
 
+from sqlalchemy.orm import joinedload
+
 from models import db, Incident, IncidentLog, PastIncident
 from tools.embedding_tool import embed_text, embed_resolved_incident
 from sqlalchemy.orm import joinedload
+from tools.embedding_tool import embed_resolved_incident
 
 VALID_SEVERITIES = {"P0", "P1", "P2"}
 DEFAULT_SEVERITY = "P2"
@@ -13,31 +16,40 @@ def normalize_severity(value):
     return sev if sev in VALID_SEVERITIES else DEFAULT_SEVERITY
 
 
-# ── CREATE ───────────────────────────────────────────────
-def save_incident(incident_id, title, description):
-    inc = Incident(
-        id=incident_id,
-        title=title,
-        description=description,
-        status="processing",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.session.add(inc)
+def save_incident(incident_id, title, description, severity=None):
+    sev = normalize_severity(severity)
+    inc = db.session.get(Incident, incident_id)
+
+    if inc:
+        inc.title = title
+        inc.description = description
+        inc.severity = sev
+        inc.status = inc.status or "processing"
+        inc.updated_at = datetime.utcnow()
+    else:
+        inc = Incident(
+            id=incident_id,
+            title=title,
+            description=description,
+            severity=sev,
+            status="processing",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.session.add(inc)
+
     db.session.commit()
-def create_incident(incident_id: str, title: str, description: str):
-    """Alias used by commander intake agent. Checks for existence first."""
-    existing = Incident.query.get(incident_id)
+    return inc.to_dict()
+
+
+def create_incident(incident_id: str, title: str, description: str, severity=None):
+    existing = db.session.get(Incident, incident_id)
     if existing:
         return existing.to_dict()
-    
-    save_incident(incident_id, title, description)
-    inc = Incident.query.get(incident_id)
-    return inc.to_dict() if inc else {"incident_id": incident_id}
+    return save_incident(incident_id, title, description, severity=severity)
 
 
 def update_incident_status(incident_id: str, status: str):
-    """Update incident lifecycle status."""
     inc = db.session.get(Incident, incident_id)
     if not inc:
         return {"status": "not_found"}
@@ -53,6 +65,19 @@ def update_incident_status(incident_id: str, status: str):
     }
 
 
+def log_action(incident_id, agent, action, detail):
+    log = IncidentLog(
+        incident_id=incident_id,
+        agent=agent,
+        action=action,
+        detail=detail,
+        created_at=datetime.utcnow(),
+    )
+    db.session.add(log)
+    db.session.commit()
+    return log.to_dict()
+
+
 def log_incident_event(
     incident_id: str,
     event_type: str = None,
@@ -60,27 +85,6 @@ def log_incident_event(
     agent: str = None,
     action: str = None,
 ):
-    """
-    Log an incident event.
-
-    Preferred usage:
-        log_incident_event(
-            incident_id="INC-123",
-            agent="triage_agent",
-            action="triage_completed",
-            detail="Severity=P0, blast_radius=global",
-        )
-
-    Backward-compatible usage:
-        log_incident_event(
-            incident_id="INC-123",
-            event_type="triage_completed",
-            detail="Severity=P0, blast_radius=global",
-        )
-
-    If agent/action are not provided, event_type is used for both to avoid
-    breaking older agent code while callers are migrated.
-    """
     final_agent = agent or event_type or "system"
     final_action = action or event_type or "event_logged"
 
@@ -100,29 +104,17 @@ def log_incident_event(
 
 
 def list_open_incidents():
-    incs = Incident.query \
-        .options(joinedload(Incident.past_incident)) \
-        .filter(Incident.status != "resolved") \
-        .order_by(Incident.created_at.desc()) \
-        .limit(50).all()
+    incs = (
+        Incident.query
+        .options(joinedload(Incident.past_incident))
+        .filter(Incident.status != "resolved")
+        .order_by(Incident.created_at.desc())
+        .limit(50)
+        .all()
+    )
     return [i.to_dict() for i in incs]
 
 
-# ── LOG ──────────────────────────────────────────────────
-def log_action(incident_id, agent, action, detail):
-    """Low-level incident log writer."""
-    log = IncidentLog(
-        incident_id=incident_id,
-        agent=agent,
-        action=action,
-        detail=detail,
-        created_at=datetime.utcnow(),
-    )
-    db.session.add(log)
-    db.session.commit()
-
-
-# ── AFTER ALL AGENTS FINISH ──────────────────────────────
 def agents_done(
     incident_id,
     severity,
@@ -132,12 +124,9 @@ def agents_done(
     agent_postmortem,
     category=None,
 ):
-    """
-    Persist final agent outputs back to Incident and PastIncident.
-    """
     inc = db.session.get(Incident, incident_id)
     if not inc:
-        return
+        return {"status": "not_found"}
 
     severity = normalize_severity(severity)
     category = normalize_severity(category) if category else severity
@@ -173,17 +162,23 @@ def agents_done(
         past.agent_resolution = agent_resolution
         past.agent_comms = agent_comms
         past.agent_postmortem = agent_postmortem
+        past.resolution_confidence = past.resolution_confidence or "agent_only"
         past.updated_at = datetime.utcnow()
 
     db.session.commit()
 
+    return {
+        "status": "updated",
+        "incident_id": incident_id,
+        "severity": severity,
+        "category": category,
+    }
 
-# ── ASSIGN ───────────────────────────────────────────────
+
 def assign_incident(incident_id, developer_name):
-    """Assign an incident to a developer."""
     inc = db.session.get(Incident, incident_id)
     if not inc:
-        return
+        return {"status": "not_found"}
 
     inc.status = "assigned"
     inc.assigned_to = developer_name
@@ -191,41 +186,14 @@ def assign_incident(incident_id, developer_name):
     inc.updated_at = datetime.utcnow()
     db.session.commit()
 
-
-# ── RESOLVE ──────────────────────────────────────────────
-def resolve_incident(
-    incident_id,
-    resolved_by,
-    agent_was_correct,
-    human_root_cause,
-    human_resolution,
-):
-    """
-    Resolve an incident and promote/update its history row.
-    """
-    inc = db.session.get(Incident, incident_id)
-    if not inc:
-        return
-
-    inc.status = "resolved"
-    inc.resolved_by = resolved_by
-    inc.resolved_at = datetime.utcnow()
-    inc.updated_at = datetime.utcnow()
-    db.session.commit()
-
-    past_incident = _graduate_to_history(
-        inc,
-        agent_was_correct,
-        human_root_cause,
-        human_resolution,
-    )
-    embed_resolved_incident(past_incident)
+    return {
+        "status": "assigned",
+        "incident_id": incident_id,
+        "assigned_to": developer_name,
+    }
 
 
 def _graduate_to_history(inc, agent_was_correct, human_root_cause, human_resolution):
-    """
-    Create or update the historical incident record after resolution.
-    """
     past = PastIncident.query.filter_by(incident_id=inc.id).first()
 
     if not past:
@@ -250,47 +218,45 @@ def _graduate_to_history(inc, agent_was_correct, human_root_cause, human_resolut
     return past
 
 
-# ── READ ─────────────────────────────────────────────────
-def get_incident(incident_id):
-    inc = Incident.query.options(joinedload(Incident.past_incident)).get(incident_id)
+def resolve_incident(
+    incident_id,
+    resolved_by,
+    agent_was_correct,
+    human_root_cause,
+    human_resolution,
+):
+    inc = db.session.get(Incident, incident_id)
     if not inc:
-        return None
-    
-    d = inc.to_dict()
-    
-    # Calculate processing time if agents are done
-    # Processing time = max(created_at) - min(created_at) for incident logs
-    if inc.status in ["agents_done", "assigned", "resolved"]:
-        logs = IncidentLog.query.filter_by(incident_id=incident_id).all()
-        if logs:
-            start_time = min(l.created_at for l in logs)
-            end_time = max(l.created_at for l in logs)
-            delta = end_time - start_time
-            d["processing_time"] = int(delta.total_seconds())
-            
-    return d
+        return {"status": "not_found"}
+
+    inc.status = "resolved"
+    inc.resolved_by = resolved_by
+    inc.resolved_at = datetime.utcnow()
+    inc.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    past_incident = _graduate_to_history(
+        inc,
+        agent_was_correct,
+        human_root_cause,
+        human_resolution,
+    )
+    embed_resolved_incident(past_incident)
+
+    return {"status": "resolved", "incident_id": incident_id}
 
 
-def get_kb_stats():
-    """Calculate knowledge base statistics."""
-    total_human_verified = PastIncident.query.filter_by(resolution_confidence='human_verified').count()
-    
-    agent_accuracy = 0
-    if total_human_verified > 0:
-        correct_count = PastIncident.query.filter_by(
-            resolution_confidence='human_verified', 
-            agent_was_correct=True
-        ).count()
-        agent_accuracy = int((correct_count / total_human_verified) * 100)
-        
-    return {
-        "human_verified_count": total_human_verified,
-        "agent_accuracy": f"{agent_accuracy}%"
-    }
+def get_incident(incident_id):
+    inc = (
+        Incident.query
+        .options(joinedload(Incident.past_incident))
+        .filter_by(id=incident_id)
+        .first()
+    )
+    return inc.to_dict() if inc else None
 
 
 def get_logs(incident_id):
-    """Fetch incident logs oldest-first."""
     logs = (
         IncidentLog.query.filter_by(incident_id=incident_id)
         .order_by(IncidentLog.created_at)
@@ -300,10 +266,13 @@ def get_logs(incident_id):
 
 
 def list_incidents():
-    incs = Incident.query \
-        .options(joinedload(Incident.past_incident)) \
-        .order_by(Incident.created_at.desc()) \
-        .limit(30).all()
+    incs = (
+        Incident.query
+        .options(joinedload(Incident.past_incident))
+        .order_by(Incident.created_at.desc())
+        .limit(30)
+        .all()
+    )
     return [i.to_dict() for i in incs]
 
 
@@ -328,13 +297,11 @@ def get_similarity_response(incident_id):
 
 
 def get_past_incidents_all():
-    """Fetch all historical incidents."""
     rows = PastIncident.query.order_by(PastIncident.created_at.desc()).all()
     return [r.to_dict() for r in rows]
 
 
 def get_past_incident_from_db(incident_id):
-    """Fetch historical records for a specific incident ID."""
     rows = (
         PastIncident.query.filter_by(incident_id=incident_id)
         .order_by(PastIncident.created_at.desc())
@@ -343,49 +310,33 @@ def get_past_incident_from_db(incident_id):
     return [r.to_dict() for r in rows]
 
 
-# ── DEV 3 MCP TOOLS ──────────────────────────────────────
-
 def get_similar_incidents(embedding: list[float], limit: int = 3):
-    """
-    Perform semantic search for past incidents.
-    Falls back to a safe empty list if pgvector is not available (e.g. SQLite).
-    """
     if not embedding:
         return []
-        
+
     try:
-        # Cosine distance similarity search - Requires pgvector
-        results = PastIncident.query \
-            .order_by(PastIncident.embedding.cosine_distance(embedding)) \
-            .limit(limit).all()
+        results = (
+            PastIncident.query
+            .order_by(PastIncident.embedding.cosine_distance(embedding))
+            .limit(limit)
+            .all()
+        )
         return [r.to_dict() for r in results]
-    except Exception as e:
-        # Graceful fallback for SQLite or missing extension
-        print(f"[DB] Similarity search skipped (pgvector not available): {e}")
+    except Exception:
         return []
 
 
 def get_runbook_by_type(incident_type: str):
-    """
-    Fetch the remediation runbook for a specific incident category.
-    """
     from models import Runbook
     rb = Runbook.query.filter_by(incident_type=incident_type).first()
     return rb.to_dict() if rb else None
 
 
 def get_contacts_by_team(team: str):
-    """
-    Fetch stakeholder contact info for a specific team.
-    """
     from models import Contact
     contacts = Contact.query.filter_by(team=team).all()
     return [c.to_dict() for c in contacts]
 
 
 def log_timeline_event(incident_id: str, actor: str, action: str, detail: str):
-    """
-    Record an agent action in the timeline (alias for log_action).
-    """
     return log_action(incident_id, agent=actor, action=action, detail=detail)
-

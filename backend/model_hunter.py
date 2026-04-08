@@ -1,36 +1,38 @@
 import os
 import time
-import google.generativeai as genai
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=api_key)
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
-print("Starting Exhaustive Model Hunt...\n")
+print("Starting model hunt...\n")
 
 working_models = []
 
-for m in genai.list_models():
-    if 'generateContent' not in m.supported_generation_methods:
+for m in client.models.list():
+    if "generateContent" not in m.supported_actions:
         continue
-        
+
     model_name = m.name
     print(f"Testing {model_name}...", end=" ", flush=True)
     try:
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content("hi", generation_config={"max_output_tokens": 5})
+        resp = client.models.generate_content(
+            model=model_name,
+            contents="hi",
+        )
         print("✅ SUCCESS")
         working_models.append(model_name)
     except Exception as e:
-        if "429" in str(e):
+        text = str(e)
+        if "429" in text or "RESOURCE_EXHAUSTED" in text:
             print("❌ 429 QUOTA")
+        elif "404" in text or "NOT_FOUND" in text:
+            print("❌ 404 NOT FOUND")
         else:
-            print(f"❌ ERROR: {str(e)[:40]}...")
-    
+            print(f"❌ ERROR: {text[:60]}...")
     time.sleep(1)
 
 print("\n--- RESULTS ---")
-print("Working Models:")
 for wm in working_models:
-    print(f" - {wm}")
+    print(" -", wm)
