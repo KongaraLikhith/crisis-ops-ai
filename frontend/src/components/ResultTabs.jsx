@@ -32,7 +32,7 @@ export default function ResultTabs({ incident }) {
       </div>
 
       {/* Tab content */}
-      <div className="p-4">
+      <div className="p-4 min-w-0">
         {activeTab === 'Live Feed' && (
           <AgentFeed
             incidentId={incident.id}

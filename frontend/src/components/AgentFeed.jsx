@@ -70,7 +70,7 @@ export default function AgentFeed({ incidentId, incidentStatus }) {
   }
 
   return (
-    <div className="flex flex-col gap-1.5 overflow-y-auto max-h-64 pr-1">
+    <div className="flex flex-col gap-1.5 overflow-y-auto overflow-x-hidden max-h-64 pr-1 w-full">
       {logs.map(log => {
         const palette = AGENT_COLORS[log.agent] || { dot: '#888', bg: '#f5f5f5' }
         return (
