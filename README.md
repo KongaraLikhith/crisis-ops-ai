@@ -123,7 +123,7 @@ gcloud run deploy crisis-ops-ai \
 ## 🤝Contributors
 Built with ❤️ during the **Google GenAI Hackathon**. 
 
-- [Mohith Raghav](https://github.com/MyThunder-World)
+- [Mohith Raghav](https://github.com/UniversalMohith)
 - [Mayank Porwal](https://github.com/mayank-porwal-da)
 - [Vijay](https://github.com/vijay-sb)
 - [Likhith K](https://github.com/KongaraLikhith)
