@@ -6,7 +6,7 @@ import traceback
 import uuid
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 from models import db
@@ -22,36 +22,55 @@ from tools.db_tools import (
     log_action,
     resolve_incident,
     save_incident,
+    update_incident_status,
 )
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Quota Mitigation (Rate Limiting) ──────────────────────
-import asyncio
+APP_NAME = "crisisops"
+VALID_SEVERITIES = {"P0", "P1", "P2"}
+DEFAULT_SEVERITY = "P2"
+
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
+GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+
+if GOOGLE_SERVICE_ACCOUNT_FILE:
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_SERVICE_ACCOUNT_FILE
+    logger.info("[Startup] Google service account configured for Calendar integration")
+else:
+    logger.warning(
+        "[Startup] GOOGLE_SERVICE_ACCOUNT_FILE not set; Calendar tool may not initialize correctly"
+    )
+
 from google.adk.models.google_llm import Gemini
 
 _original_generate = Gemini.generate_content_async
 
+
 async def patched_generate_content_async(self, *args, **kwargs):
-    # Add a 5 second sleep before every single AI request to stay under 15 RPM
-    logger.info("[Quota] Sleeping 5s to stay under Free Tier limits...")
+    logger.info("[Quota] Sleeping 5s before model call")
     await asyncio.sleep(5)
     async for event in _original_generate(self, *args, **kwargs):
         yield event
 
+
 Gemini.generate_content_async = patched_generate_content_async
 
-# ── App setup ────────────────────────────────────────────
-app = Flask(__name__, static_folder='static')
+try:
+    from google.api_core.exceptions import ResourceExhausted as _ResourceExhaustedError
+except Exception:
+    _ResourceExhaustedError = Exception
 
+try:
+    from google.genai.errors import ClientError
+except Exception:
+    ClientError = Exception
+
+app = Flask(__name__, static_folder="static")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-APP_NAME = "crisisops"
-VALID_SEVERITIES = {"P0", "P1", "P2"}
-DEFAULT_SEVERITY = "P2"
 
 CORS(
     app,
@@ -77,20 +96,17 @@ def normalize_severity(value: str | None) -> str:
 
 
 def _get_runner():
-    """
-    Lazily import and build the ADK InMemoryRunner after app setup.
-    """
     from google.adk.runners import InMemoryRunner
-    from agents.commander import root_agent
-    return InMemoryRunner(agent=root_agent, app_name="crisisops")
+    from agents.commander import crisis_workflow
+
+    return InMemoryRunner(agent=crisis_workflow, app_name=APP_NAME)
+
+
+def _safe_dict(value):
+    return value if isinstance(value, dict) else {}
 
 
 async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
-    """
-    Execute the full crisis workflow via the ADK runner and extract the
-    structured outputs written to session state by each sub-agent.
-    """
-    from google.adk.sessions import InMemorySessionService
     import google.genai.types as types
 
     runner = _get_runner()
@@ -110,16 +126,25 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
             "INCIDENT_REPORT": report_text,
             "INCIDENT_ID": incident_id,
             "INCIDENT_TITLE": title,
-            # Pre-seed downstream keys so agent instruction templates never
-            # raise KeyError if an upstream agent fails to write its output.
-            "intake_summary": "",
-            "triage_report": "",
-            "comms_summary": "",
+            "INCIDENT_DESCRIPTION": description,
+            "INCIDENT_SEVERITY": DEFAULT_SEVERITY,
+            "INCIDENT_STATUS": "processing",
+            "PIPELINE_STATUS": "running",
+            "SLACK_CHANNEL": "",
+            "SLACK_CHANNEL_ID": "",
+            "WAR_ROOM_LINK": "",
+            "CALENDAR_EVENT_ID": "",
+            "CALENDAR_EVENT_URL": "",
+            "INCIDENT_DOC_URL": "",
+            "INCIDENT_SHEET_URL": "",
+            "TRIAGE_REPORT": {},
+            "COMMS_SUMMARY": {},
+            "INCIDENT_DOCUMENT": {},
+            "RESOLUTION_NOTES": "",
         },
     )
 
-    from google.genai.types import Content, Part
-    initial_message = Content(
+    initial_message = types.Content(
         role="user",
         parts=[types.Part(text=report_text)],
     )
@@ -130,18 +155,27 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         session_id=incident_id,
         new_message=initial_message,
     ):
-        # Capture the final session state once the run completes
-        if hasattr(event, "state"):
-            final_state = event.state
+        pass
 
-    # If state wasn't emitted as an event, fetch it directly from the session
-    if not final_state:
+    try:
         stored = await session_service.get_session(
-            app_name=runner.app_name,
+            app_name=APP_NAME,
             user_id="system",
             session_id=incident_id,
         )
         final_state = stored.state if stored else {}
+    except Exception as e:
+        logger.error(
+            "[Pipeline] Failed to fetch final session state for %s: %s",
+            incident_id,
+            e,
+        )
+        traceback.print_exc()
+        return {"ok": False, "reason": "state_fetch_failed"}
+
+    if not final_state:
+        logger.warning("[Pipeline] No final state found for %s", incident_id)
+        return {"ok": False, "reason": "no_final_state"}
 
     logger.info(
         "[Pipeline] Completed for %s. State keys: %s",
@@ -149,47 +183,137 @@ async def _run_pipeline(incident_id: str, title: str, description: str) -> dict:
         list(final_state.keys()),
     )
 
-    triage: dict = final_state.get("TRIAGE_REPORT") or {}
-    comms: dict = final_state.get("COMMS_SUMMARY") or {}
-    docs: dict = final_state.get("INCIDENT_DOCUMENT") or {}
+    triage = _safe_dict(final_state.get("TRIAGE_REPORT"))
+    comms = _safe_dict(final_state.get("COMMS_SUMMARY"))
+    docs = _safe_dict(final_state.get("INCIDENT_DOCUMENT"))
+
+    logger.info("[Pipeline] TRIAGE_REPORT raw for %s: %r", incident_id, triage)
+    logger.info("[Pipeline] COMMS_SUMMARY raw for %s: %r", incident_id, comms)
+    logger.info("[Pipeline] INCIDENT_DOCUMENT raw for %s: %r", incident_id, docs)
+
+    triage_root_cause = (triage.get("summary") or "").strip()
+    triage_resolution = (triage.get("recommended_action") or "").strip()
+    comms_summary = (comms.get("summary") or "").strip()
+    docs_summary = (docs.get("summary") or "").strip()
 
     category = normalize_severity(
-        triage.get("confirmed_severity") or final_state.get("CONFIRMED_SEVERITY")
+        triage.get("confirmed_severity")
+        or final_state.get("CONFIRMED_SEVERITY")
+        or final_state.get("INCIDENT_SEVERITY")
     )
 
+    required_outputs_present = all([
+        triage_root_cause,
+        comms_summary,
+        docs_summary,
+    ])
+
+    if not required_outputs_present:
+        logger.warning(
+            "[Pipeline] Missing outputs for %s | triage_summary=%s triage_reco=%s comms_summary=%s docs_summary=%s",
+            incident_id,
+            bool(triage_root_cause),
+            bool(triage_resolution),
+            bool(comms_summary),
+            bool(docs_summary),
+        )
+        final_state["PIPELINE_STATUS"] = "incomplete"
+        return {
+            "ok": False,
+            "reason": "no_agent_outputs",
+            "triage_raw": triage,
+            "comms_raw": comms,
+            "docs_raw": docs,
+            "state": final_state,
+        }
+
+    final_state["PIPELINE_STATUS"] = "completed"
     return {
-        "triage_root_cause": triage.get("summary") or final_state.get("triage_report", ""),
-        "triage_resolution": triage.get("recommended_action", ""),
-        "comms": comms.get("summary") or final_state.get("comms_summary", ""),
-        "docs": docs.get("summary") or final_state.get("incident_document", ""),
+        "ok": True,
+        "triage_root_cause": triage_root_cause,
+        "triage_resolution": triage_resolution,
+        "comms": comms_summary,
+        "docs": docs_summary,
         "category": category,
+        "state": final_state,
     }
 
 
 def run_agents_background(incident_id: str, title: str, description: str):
-    """Runs inside a daemon thread — creates its own event loop and app context."""
     logger.info("[Background] Starting agent pipeline for %s", incident_id)
-    try:
-        with app.app_context():
+
+    with app.app_context():
+        try:
+            log_action(
+                incident_id,
+                "agents",
+                "pipeline_started",
+                "Background workflow started",
+            )
+
             results = asyncio.run(_run_pipeline(incident_id, title, description))
+
+            if not results.get("ok"):
+                reason = results.get("reason", "pipeline_incomplete")
+                logger.warning("[Pipeline] Incomplete for %s: %s", incident_id, reason)
+
+                if reason == "no_agent_outputs":
+                    logger.warning(
+                        "[Pipeline] Raw outputs for %s | triage=%r | comms=%r | docs=%r",
+                        incident_id,
+                        results.get("triage_raw", {}),
+                        results.get("comms_raw", {}),
+                        results.get("docs_raw", {}),
+                    )
+
+                log_action(incident_id, "agents", "pipeline_incomplete", reason)
+                update_incident_status(incident_id, "processing")
+                return
+
             category = normalize_severity(results.get("category"))
 
-            agents_done(
+            log_action(
                 incident_id,
-                category,
+                "triage_agent",
+                "triage_completed",
                 results.get("triage_root_cause", ""),
-                results.get("triage_resolution", ""),
-                results.get("comms", ""),
-                results.get("docs", ""),
-                category,
             )
-    except Exception as e:
-        logger.error(
-            "[ERROR] Background agent run failed for %s: %s",
-            incident_id,
-            str(e),
-        )
-        traceback.print_exc()
+            log_action(
+                incident_id,
+                "comms_agent",
+                "comms_completed",
+                results.get("comms", ""),
+            )
+            log_action(
+                incident_id,
+                "docs_agent",
+                "docs_completed",
+                results.get("docs", ""),
+            )
+
+            agents_done(
+                incident_id=incident_id,
+                severity=category,
+                agent_root_cause=results.get("triage_root_cause", ""),
+                agent_resolution=results.get("triage_resolution", ""),
+                agent_comms=results.get("comms", ""),
+                agent_postmortem=results.get("docs", ""),
+                category=category,
+            )
+
+            log_action(incident_id, "agents", "agents_done", "All agent outputs saved")
+
+        except (_ResourceExhaustedError, ClientError) as e:
+            logger.error("[Quota] Gemini quota exhausted for %s: %s", incident_id, e)
+            log_action(incident_id, "agents", "quota_exhausted", str(e))
+            update_incident_status(incident_id, "processing")
+            traceback.print_exc()
+
+        except Exception as e:
+            logger.error("[ERROR] Background agent run failed for %s: %s", incident_id, e)
+            log_action(incident_id, "agents", "pipeline_failed", str(e))
+            update_incident_status(incident_id, "processing")
+            traceback.print_exc()
 
 
 @app.route("/api/incident/trigger", methods=["POST"])
@@ -221,7 +345,9 @@ def trigger_incident():
     except Exception as e:
         logger.error("[ERROR] /api/incident/trigger failed: %s", str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to trigger incident", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to trigger incident", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/incident/<incident_id>/assign", methods=["PATCH"])
@@ -239,7 +365,9 @@ def assign(incident_id):
     except Exception as e:
         logger.error("[ERROR] /api/incident/%s/assign failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to assign incident", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to assign incident", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/incident/<incident_id>/resolve", methods=["PATCH"])
@@ -266,7 +394,9 @@ def resolve(incident_id):
     except Exception as e:
         logger.error("[ERROR] /api/incident/%s/resolve failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to resolve incident", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to resolve incident", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/incident/<incident_id>", methods=["GET"])
@@ -280,7 +410,9 @@ def get_one(incident_id):
     except Exception as e:
         logger.error("[ERROR] /api/incident/%s failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to fetch incident", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to fetch incident", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/incident/<incident_id>/similar", methods=["GET"])
@@ -297,33 +429,36 @@ def get_similar(incident_id):
 def get_incident_logs(incident_id):
     try:
         return jsonify(get_logs(incident_id))
-
     except Exception as e:
         logger.error("[ERROR] /api/logs/%s failed: %s", incident_id, str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to fetch logs", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to fetch logs", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/incidents", methods=["GET"])
 def get_all():
     try:
         return jsonify(list_incidents())
-
     except Exception as e:
         logger.error("[ERROR] /api/incidents failed: %s", str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to fetch incidents", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to fetch incidents", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/past-incidents", methods=["GET"])
 def get_past():
     try:
         return jsonify(get_past_incidents_all())
-
     except Exception as e:
         logger.error("[ERROR] /api/past-incidents failed: %s", str(e))
         traceback.print_exc()
-        return jsonify({"error": "failed to fetch past incidents", "details": str(e)}), 500
+        return jsonify(
+            {"error": "failed to fetch past incidents", "details": str(e)}
+        ), 500
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -341,18 +476,13 @@ def health():
     return jsonify({"status": "ok"})
 
 
-# ── Serve Frontend ─────────────────────────────────────
-from flask import send_from_directory
-
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
 def serve(path):
-    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+    return send_from_directory(app.static_folder, "index.html")
 
 
 if __name__ == "__main__":
-
     app.run(debug=False, port=8000)

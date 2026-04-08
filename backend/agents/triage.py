@@ -11,50 +11,54 @@ from tools.db_tools import (
     get_incident,
     update_incident_status,
     log_incident_event,
-    get_similar_incidents,
     get_runbook_by_type,
 )
 
-model_name = os.getenv("MODEL", "gemini-3-flash-preview")
+model_name = os.getenv("MODEL", "gemini-flash-lite-latest")
 logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
 
-
-class AffectedSystem(BaseModel):
-    name: str
-    status: str
-    impact_description: str
-
-
-class TriageReport(BaseModel):
-    incident_id: str
-    confirmed_severity: str
-    blast_radius: str
-    affected_systems: List[AffectedSystem]
-    estimated_users_impacted: Optional[int]
-    recommended_action: str
-    requires_executive_notification: bool
-    requires_vendor_escalation: bool
-    summary: str
-    similar_incidents: List[dict] = Field(default_factory=list)
-
-
 _P0_SIGNALS = frozenset([
-    "outage", "down", "data loss", "data breach", "breach", "revenue",
-    "all users", "production down", "complete failure", "database unavailable",
-    "critical", "zero access", "full outage", "total failure",
+    "outage",
+    "down",
+    "data loss",
+    "data breach",
+    "breach",
+    "revenue",
+    "all users",
+    "production down",
+    "complete failure",
+    "database unavailable",
+    "critical",
+    "zero access",
+    "full outage",
+    "total failure",
 ])
 
 _P1_SIGNALS = frozenset([
-    "degraded", "slow", "partial outage", "intermittent", "high error rate",
-    "login failing", "payment failing", "elevated latency", "increased errors",
-    "majority of users", "most users",
+    "degraded",
+    "slow",
+    "partial outage",
+    "intermittent",
+    "high error rate",
+    "login failing",
+    "payment failing",
+    "elevated latency",
+    "increased errors",
+    "majority of users",
+    "most users",
 ])
 
 _P2_SIGNALS = frozenset([
-    "some users", "minor", "workaround", "occasionally", "low impact",
-    "few users", "edge case", "non-critical",
+    "some users",
+    "minor",
+    "workaround",
+    "occasionally",
+    "low impact",
+    "few users",
+    "edge case",
+    "non-critical",
 ])
 
 _SYSTEM_MAP = {
@@ -88,37 +92,30 @@ def normalize_severity(value: str) -> str:
     return sev if sev in SEVERITY_ORDER else "P2"
 
 
-def find_similar_incidents(tool_context: ToolContext, description: str) -> dict:
-    try:
-        results = search_similar_incidents(
-            query_text=description,
-            limit=3,
-            return_mode="json",
-        )
-        tool_context.state["SIMILAR_INCIDENTS"] = results
-        logger.info("[Triage] find_similar_incidents: %d match(es)", len(results))
-        return {
-            "status": "ok",
-            "count": len(results),
-            "similar_incidents": results,
-        }
-    except Exception as e:
-        logger.error("[Triage] find_similar_incidents failed: %s", str(e))
-        tool_context.state["SIMILAR_INCIDENTS"] = []
-        return {
-            "status": "error",
-            "count": 0,
-            "error": str(e),
-            "similar_incidents": [],
-        }
+class AffectedSystem(BaseModel):
+    name: str
+    status: str
+    impact_description: str
 
 
-def assess_severity(
-    tool_context: ToolContext,
-    description: str,
-    initial_severity: str,
-) -> dict:
-    desc = description.lower()
+class TriageReport(BaseModel):
+    incident_id: str
+    confirmed_severity: str
+    blast_radius: str
+    affected_systems: List[AffectedSystem]
+    estimated_users_impacted: Optional[int] = None
+    recommended_action: str
+    requires_executive_notification: bool
+    requires_vendor_escalation: bool
+    oncall_paged: bool = False
+    oncall_team: Optional[str] = None
+    summary: str
+    similar_incidents: List[dict] = Field(default_factory=list)
+    runbook_matches: List[dict] = Field(default_factory=list)
+
+
+def assess_severity(tool_context: ToolContext, description: str, initial_severity: str) -> dict:
+    desc = f" {(description or '').lower()} "
 
     if any(sig in desc for sig in _P0_SIGNALS):
         confirmed = "P0"
@@ -131,43 +128,102 @@ def assess_severity(
         justification = "P2 signals detected: limited or moderate impact."
     else:
         confirmed = normalize_severity(initial_severity)
-        justification = f"No override signals; retaining initial severity {confirmed}."
+        justification = f"No override signals detected; retaining initial severity {confirmed}."
 
     tool_context.state["CONFIRMED_SEVERITY"] = confirmed
     tool_context.state["SEVERITY_JUSTIFICATION"] = justification
-
-    logger.info("[Triage] assess_severity: initial=%s → confirmed=%s", initial_severity, confirmed)
     return {"confirmed_severity": confirmed, "justification": justification}
 
 
-def identify_affected_systems(
-    tool_context: ToolContext,
-    description: str,
-) -> dict:
-    desc = description.lower()
+def identify_affected_systems(tool_context: ToolContext, description: str) -> dict:
+    desc = f" {(description or '').lower()} "
     affected: list[dict] = []
     seen: set[str] = set()
 
     for keyword, (system_name, status) in _SYSTEM_MAP.items():
         if keyword in desc and system_name not in seen:
-            affected.append({
-                "name": system_name,
-                "status": status,
-                "impact_description": f"Keyword '{keyword.strip()}' matched in incident description.",
-            })
+            affected.append(
+                {
+                    "name": system_name,
+                    "status": status,
+                    "impact_description": f"Keyword '{keyword.strip()}' matched in incident description.",
+                }
+            )
             seen.add(system_name)
 
     if not affected:
-        affected.append({
-            "name": "Unknown / Under Investigation",
-            "status": "unknown",
-            "impact_description": "No system keywords matched — manual investigation required.",
-        })
+        affected.append(
+            {
+                "name": "Unknown / Under Investigation",
+                "status": "unknown",
+                "impact_description": "No system keywords matched; manual investigation required.",
+            }
+        )
 
     tool_context.state["AFFECTED_SYSTEMS"] = affected
+    tool_context.state["AFFECTED_SYSTEM_COUNT"] = len(affected)
+    return {"affected_systems": affected, "affected_system_count": len(affected)}
 
-    logger.info("[Triage] identify_affected_systems: %d system(s) identified", len(affected))
-    return {"affected_systems": affected, "count": len(affected)}
+
+def find_similar_incidents(tool_context: ToolContext, description: str) -> dict:
+    try:
+        search_results = search_similar_incidents(
+            query_text=description,
+            limit=3,
+            return_mode="json",
+        ) or []
+    except Exception as e:
+        logger.warning("[Triage] search_similar_incidents failed: %s", str(e))
+        search_results = []
+
+    combined = []
+    seen_ids = set()
+
+    for item in search_results:
+        incident_id = (
+            item.get("incident_id")
+            or item.get("id")
+            or item.get("INCIDENT_ID")
+            or ""
+        )
+        dedupe_key = incident_id or str(item)
+        if dedupe_key in seen_ids:
+            continue
+        seen_ids.add(dedupe_key)
+        combined.append(item)
+
+    tool_context.state["SIMILAR_INCIDENTS"] = combined[:5]
+    return {
+        "status": "ok",
+        "count": len(combined[:5]),
+        "similar_incidents": combined[:5],
+    }
+
+
+def fetch_runbook_matches(tool_context: ToolContext, description: str) -> dict:
+    desc = (description or "").lower()
+
+    if "database" in desc or " db " in f" {desc} " or "alloydb" in desc:
+        runbook_type = "database"
+    elif "auth" in desc or "login" in desc:
+        runbook_type = "auth"
+    elif "payment" in desc or "billing" in desc:
+        runbook_type = "payments"
+    else:
+        runbook_type = "generic"
+
+    try:
+        runbook = get_runbook_by_type(runbook_type) or []
+    except Exception as e:
+        logger.warning("[Triage] get_runbook_by_type failed: %s", str(e))
+        runbook = []
+
+    tool_context.state["RUNBOOK_TYPE"] = runbook_type
+    tool_context.state["RUNBOOK_MATCHES"] = runbook
+    return {
+        "runbook_type": runbook_type,
+        "runbook_matches": runbook,
+    }
 
 
 def calculate_blast_radius(
@@ -188,7 +244,7 @@ def calculate_blast_radius(
         vendor_escalate = False
         action = "page_oncall"
     else:
-        blast_radius = "localised"
+        blast_radius = "localized"
         exec_notify = False
         vendor_escalate = False
         action = "monitor"
@@ -198,10 +254,6 @@ def calculate_blast_radius(
     tool_context.state["REQUIRES_VENDOR_ESCALATION"] = vendor_escalate
     tool_context.state["RECOMMENDED_ACTION"] = action
 
-    logger.info(
-        "[Triage] blast_radius=%s exec=%s vendor=%s action=%s",
-        blast_radius, exec_notify, vendor_escalate, action,
-    )
     return {
         "blast_radius": blast_radius,
         "requires_executive_notification": exec_notify,
@@ -210,11 +262,7 @@ def calculate_blast_radius(
     }
 
 
-def escalate_to_oncall(
-    tool_context: ToolContext,
-    team: str,
-    reason: str,
-) -> dict:
+def escalate_to_oncall(tool_context: ToolContext, team: str, reason: str) -> dict:
     incident_id = tool_context.state.get("INCIDENT_ID", "unknown")
 
     log_incident_event(
@@ -226,54 +274,54 @@ def escalate_to_oncall(
 
     tool_context.state["ONCALL_PAGED"] = True
     tool_context.state["ONCALL_TEAM"] = team
-
-    logger.info("[Triage] escalate_to_oncall: team=%s incident=%s", team, incident_id)
     return {"status": "paged", "team": team, "incident_id": incident_id}
 
 
-def save_triage_report(
-    tool_context: ToolContext,
-    summary: str,
-) -> dict:
-    similar_incidents = tool_context.state.get("SIMILAR_INCIDENTS", [])
-
+def save_triage_report(tool_context: ToolContext, summary: str) -> dict:
     report = TriageReport(
         incident_id=tool_context.state.get("INCIDENT_ID", "unknown"),
-        confirmed_severity=normalize_severity(tool_context.state.get("CONFIRMED_SEVERITY", "P2")),
-        blast_radius=tool_context.state.get("BLAST_RADIUS", "localised"),
+        confirmed_severity=normalize_severity(
+            tool_context.state.get(
+                "CONFIRMED_SEVERITY",
+                tool_context.state.get("INCIDENT_SEVERITY", "P2"),
+            )
+        ),
+        blast_radius=tool_context.state.get("BLAST_RADIUS", "localized"),
         affected_systems=[
             AffectedSystem(**s)
             for s in tool_context.state.get("AFFECTED_SYSTEMS", [])
         ],
         estimated_users_impacted=tool_context.state.get("ESTIMATED_USERS_IMPACTED"),
         recommended_action=tool_context.state.get("RECOMMENDED_ACTION", "monitor"),
-        requires_executive_notification=tool_context.state.get("REQUIRES_EXEC_NOTIFICATION", False),
-        requires_vendor_escalation=tool_context.state.get("REQUIRES_VENDOR_ESCALATION", False),
+        requires_executive_notification=tool_context.state.get(
+            "REQUIRES_EXEC_NOTIFICATION", False
+        ),
+        requires_vendor_escalation=tool_context.state.get(
+            "REQUIRES_VENDOR_ESCALATION", False
+        ),
+        oncall_paged=tool_context.state.get("ONCALL_PAGED", False),
+        oncall_team=tool_context.state.get("ONCALL_TEAM"),
         summary=summary,
-        similar_incidents=similar_incidents,
+        similar_incidents=tool_context.state.get("SIMILAR_INCIDENTS", []),
+        runbook_matches=tool_context.state.get("RUNBOOK_MATCHES", []),
     )
 
     tool_context.state["TRIAGE_REPORT"] = report.model_dump()
+    tool_context.state["INCIDENT_SEVERITY"] = report.confirmed_severity
 
     if report.confirmed_severity in ("P0", "P1"):
         update_incident_status(
             incident_id=report.incident_id,
             status="in_triage",
         )
-        log_incident_event(
-            incident_id=report.incident_id,
-            agent="Triage",
-            action="triage_completed",
-            detail=f"Severity={report.confirmed_severity}, blast_radius={report.blast_radius}",
-        )
 
-    logger.info(
-        "[Triage] save_triage_report: id=%s severity=%s systems=%d similar=%d",
-        report.incident_id,
-        report.confirmed_severity,
-        len(report.affected_systems),
-        len(report.similar_incidents),
+    log_incident_event(
+        incident_id=report.incident_id,
+        agent="Triage",
+        action="triage_completed",
+        detail=f"Severity={report.confirmed_severity}, blast_radius={report.blast_radius}",
     )
+
     return {"status": "success", "triage_report": report.model_dump()}
 
 
@@ -288,75 +336,35 @@ triage_agent = Agent(
     instruction="""
 You are the CrisisOps Triage Agent.
 
-Your job is to quickly but carefully assess the impact of the active incident.
+Workflow:
+1. Call assess_severity.
+2. Call identify_affected_systems.
+3. Call find_similar_incidents.
+4. Call fetch_runbook_matches.
+5. Call calculate_blast_radius.
+6. If recommended_action is page_oncall or executive_brief, call escalate_to_oncall.
+7. Call save_triage_report.
 
-SEVERITY SCALE:
-- P0: most severe
-- P1: high severity
-- P2: least severe among these priorities
-
-━━━ STEP 1 — Confirm severity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `assess_severity` with:
-  - description      = { INCIDENT_DESCRIPTION }
-  - initial_severity = { INCIDENT_SEVERITY }
-
-━━━ STEP 2 — Identify affected systems ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `identify_affected_systems` with:
-  - description = { INCIDENT_DESCRIPTION }
-
-━━━ STEP 3 — Find similar past incidents ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `find_similar_incidents` with:
-  - description = { INCIDENT_DESCRIPTION }
-
-Use any similar incidents found to inform your recommended_action and summary.
-
-━━━ STEP 4 — Calculate blast radius ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `calculate_blast_radius` using:
-  - confirmed_severity    = value from STEP 1
-  - affected_system_count = length of AFFECTED_SYSTEMS from STEP 2
-
-━━━ STEP 4 — Search for Similar Incidents & Runbooks ━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Call `get_similar_incidents` using the description to find historical context.
-2. Call `get_runbook_by_type` using the identified system or category to retrieve remediation steps.
-3. Include these findings in your summary.
-
-━━━ STEP 5 — Escalate if required ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-If the recommended_action is 'page_oncall' or 'executive_brief', call
-`escalate_to_oncall` with:
-  - team   = the most appropriate on-call team (platform | security | dba | executive)
-  - reason = a short justification referencing severity and blast radius.
-
-━━━ STEP 6 — Save the triage report ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Call `save_triage_report` with a 1–2 sentence plain-English summary of:
-  - confirmed severity
-  - blast radius
-  - key affected systems
-  - recommended action
-  - similar past incident IDs (if found)
-
-Finally, present a concise triage summary back to the user.
-
-Finally, present a concise triage summary back to the user.
-
-━━━ CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-INCIDENT_ID:        { INCIDENT_ID }
-INCIDENT_TITLE:     { INCIDENT_TITLE }
-INCIDENT_SEVERITY:  { INCIDENT_SEVERITY }
-INCIDENT_DESCRIPTION:
-{ INCIDENT_DESCRIPTION }
+Final output:
+Return a concise triage summary with:
+- confirmed severity
+- blast radius
+- affected systems
+- recommended action
+- similar incident IDs if available
+- whether escalation happened
 """,
     tools=[
         assess_severity,
         identify_affected_systems,
         find_similar_incidents,
+        fetch_runbook_matches,
         calculate_blast_radius,
         escalate_to_oncall,
         save_triage_report,
         get_incident,
         update_incident_status,
         log_incident_event,
-        get_similar_incidents,
-        get_runbook_by_type,
     ],
     output_key="triage_report",
 )
