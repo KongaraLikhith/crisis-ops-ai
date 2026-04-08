@@ -1,92 +1,132 @@
-# 🚀 CrisisOps AI
-**Autonomous Multi-Agent Incident Response & Documentation System**
+#  🚨 CrisisOps AI
+Autonomous Multi-Agent Incident Response System
 
-CrisisOps AI is a cutting-edge, autonomous emergency response platform designed to streamline incident management during critical system failures. Leveraging Google's **Gemini 1.5/2.5** models and the **Google ADK (Agent Development Kit)**, CrisisOps AI orchestrates a team of specialized agents to handle triage, stakeholder communication, and post-mortem documentation in real-time.
+CrisisOps AI is an intelligent, autonomous incident response platform designed to handle critical system failures in real time. It leverages Google’s Gemini models and a multi-agent orchestration framework to triage incidents, notify stakeholders, and generate post-mortems without manual intervention.
 
 ---
 
-## 📽️ Demo & Deployment
-- **Live Dashboard**: [https://crisis-ops-ai-253590687342.us-central1.run.app](https://crisis-ops-ai-253590687342.us-central1.run.app)
-- **Deployment Platform**: Google Cloud Run (Unified Container)
+##  📽️ Live Demo
+- Dashboard: https://crisis-ops-ai-253590687342.us-central1.run.app
+- Deployed on: Google Cloud Run
+
+---
+
+##  🛠️ What It Does
+CrisisOps AI replaces manual incident handling with an AI-driven multi-agent workflow:
+
+1. Incident Intake – Parses raw alerts/logs
+2. Triage and Root Cause Analysis – Identifies severity and likely causes
+3. Stakeholder Communication – Sends automated updates via Slack, Creates War Rooms etc.,.
+4. Post-Mortem Generation – Produces structured incident reports
+
+---
+
+## 🤖  Multi-Agent Architecture
+
+Leader–Follower Design (Google ADK)
+
+- Commander Agent (Leader)  
+  Orchestrates the workflow and coordinates agents
+
+- Triage Agent  
+  Performs root cause analysis and suggests fixes
+
+- Communication Agent  
+  Sends real-time alerts via Slack, Creates War Rooms etc.,.
+
+- Documentation Agent  
+  Generates post-mortems and action items
 
 ---
 
 ## ✨ Key Features
-- **🤖 Autonomous Multi-Agent Pipeline**: 
-  - **Intake Agent**: Parses raw incident reports and initializes response.
-  - **Triage Agent**: Analyzes root causes and suggests technical resolutions.
-  - **Communication Agent**: Automated stakeholder alerts via **Slack**.
-  - **Documentation Agent**: Generates comprehensive post-mortems and next-steps.
-- **⚡ Real-time Hybrid Dashboard**: A sleek React-based interface to monitor agent activity and incident status.
-- **🛠️ MCP Integration**: Ready for Google Workspace (Gmail, Docs, Calendar) via Managed Model Context Protocol.
-- **🧠 Intelligent Vector Search**: (Upcoming) Contextual awareness of past incidents to speed up resolution.
+
+- Fully autonomous incident response pipeline
+- Powered by Gemini models
+- Real-time monitoring dashboard (React)
+- Slack integration for alerts
+- Structured incident logging (PostgreSQL)
+- Vector search for historical incidents (planned)
 
 ---
 
-## 🏗️ Technical Architecture
-CrisisOps AI uses a **Leader-Follower** architecture powered by the Google ADK:
-- **Leader**: `CommanderAgent` orchestrates the workflow.
-- **Followers**: Specialized sub-agents for Triage, Comms, and Docs.
-- **Backend**: Flask + SQLAlchemy (PostgreSQL) + Uvicorn/Gunicorn.
-- **Frontend**: React + Vite + Vanilla CSS (Glassmorphism design).
+## Tech Stack
+
+Backend:
+- Python, Flask, SQLAlchemy
+- PostgreSQL (Cloud SQL)
+- Gunicorn / Uvicorn
+
+Frontend:
+- React, Vite, Axios
+
+AI and Orchestration:
+- Google Gemini
+- Google ADK
+
+Infrastructure:
+- Google Cloud Run
+- Artifact Registry
+- Secret Manager
 
 ---
 
-## 🛠️ Built With
-- **LLM**: Google Gemini 1.5 Flash / 2.5 Flash
-- **Framework**: [Google ADK](https://github.com/google/adk)
-- **Backend**: Python, Flask, Psycopg3
-- **Frontend**: React, Vite, Axios
-- **Database**: Google Cloud SQL (PostgreSQL)
-- **Infrastructure**: Google Cloud Run, Artifact Registry, Secret Manager
+## Getting Started
 
----
-
-## 🚀 Getting Started
-
-### Prerequisites
+Prerequisites:
 - Python 3.11+
 - Node.js 20+
-- Google Cloud Project with Gemini API access
+- Google Cloud project with Gemini API access
 
-### Local Development
+---
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/KongaraLikhith/crisis-ops-ai.git
-   cd crisis-ops-ai
-   ```
+## Local Setup
 
-2. **Backend Setup**:
-   ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   cp .env.example .env # Add your API keys here
-   python main.py
-   ```
-
-3. **Frontend Setup**:
-   ```bash
-   cd ../frontend
-   npm install
-   npm run dev
-   ```
-
-### ☁️ Cloud Deployment
+### 1. Clone the Repository
+```bash
+git clone https://github.com/KongaraLikhith/crisis-ops-ai.git
+cd crisis-ops-ai
+```
+### 2. Backend
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python main.py
+```
+### 3. Frontend
+```bash
+cd ../frontend
+npm install
+npm run dev
+```
+## Deployment (Cloud Run)
 The project is optimized for **Google Cloud Run**. To deploy your own instance:
 ```bash
-gcloud run deploy crisis-ops-ai --source . --region us-central1 --allow-unauthenticated
+gcloud run deploy crisis-ops-ai \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
 ```
+---
+
+## 🔮Future Enhancements
+
+- Role-based access control
+- Incident analytics dashboard (MTTR, trends)
+- Memory layer for learning across incidents
 
 ---
 
-## 🤝 Contributing
-Built with ❤️ during the **Google AI Agent Hackathon**. 
+## 🤝Contributors
+Built with ❤️ during the **Google GenAI Hackathon**. 
 
-- **Developers**: [Likhith Kongara](https://github.com/KongaraLikhith), [Mayank](https://github.com/mayank-sb)
-- **Agentic Companion**: Antigravity (Powered by Google Deepmind)
+- [Mohith Raghav](https://github.com/MyThunder-World)
+- [Mayank Porwal](https://github.com/mayank-porwal-da)
+- [Vijay](https://github.com/vijay-sb)
+- [Likhith K](https://github.com/KongaraLikhith)
 
 ---
-*Empowering SREs with the power of Autonomy.*
+
